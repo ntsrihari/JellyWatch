@@ -1,99 +1,123 @@
 # Nexus — Tasks
 
-Status: **planning only. Implementation has not started and waits for approval.**
+Revision 2 (14 Nov 2026). **Planning only. Don't start implementation until Gate 0 is cleared.**
+Tags: **[OWNER]** owner-approved · **[SPEC]** · **[REC]** pending approval · **[INFRA]** changes knowhere or the tailnet and needs explicit owner approval each time.
 
-Legend:
-- **Blocked by** names a decision in DECISIONS.md that must be approved first.
-- Tasks tagged **[REC]** come from engineering recommendations, not the spec.
-- Tasks tagged **[INFRA]** change knowhere or its network. Nexus engineers don't do these without the owner's explicit approval.
+## Gate 0 — before any code
+| # | Item | Status |
+|---|---|---|
+| G-1 | Architecture decisions A-01 to A-17 | ✅ Approved by the owner, 14 Nov 2026 |
+| G-2 | B-01: approve the pending recommendations (stack P-xx, design R-01 to R-13) | ⏳ Needed |
+| G-3 | B-02: create `ntsrihari/knowhere-nexus` and attach it to the build environment; move these documents there | ⏳ Needed |
+| G-4 | B-03: Phase 1 catalog source (`catalog.yaml` until Collector publishes) | ⏳ Needed |
+| G-5 | B-04: provisional `prism/0` theme schema | ⏳ Needed |
+| G-6 | B-05a–c: confirm the defaults (widget fields, session times, Photos/DNS admin-only). Code can start on the defaults | ◻ Optional before code |
 
-## Gate 0 — Approvals before any code
-- [ ] G-1 Owner reviews CLAUDE.md, ARCHITECTURE.md, API_SPEC.md, SECURITY.md, TASKS.md and DECISIONS.md
-- [ ] G-2 Decide the spec conflicts C-01 to C-06
-- [ ] G-3 Approve or amend the proposed decisions P-01 to P-15
-- [ ] G-4 Answer the Phase 1-relevant open decisions: D-01 (widget visibility), D-02 (launcher source), D-07 (session lifetimes), D-08 (Tailscale identity), D-09 (routing), D-12 (repo location), D-13 (Jellyfin token model)
-- [ ] G-5 Create the `knowhere-nexus` repo, or approve another location, and move these documents there
+## Gate D — before Phase 1 deployment (code can proceed without these)
+| # | Item |
+|---|---|
+| D-G1 | B-06 Routing and TLS strategy **[INFRA]** |
+| D-G2 | B-07 Authorized reverse-proxy routes for Phase 1 **[INFRA]** |
+| D-G3 | B-08 Tailscale ACL, and the identity-header binding choice **[INFRA]** |
+| D-G4 | B-09 Host mounts for Nexus **[INFRA]** |
+| D-G5 | B-10 Deploy docker-socket-proxy (read-only), Nexus and the Caddy routes **[INFRA]** |
 
-## Phase 1 — Nexus MVP (Plan §Roadmap Phase 1)
-Gate from the Plan: *family can sign in and see live status.*
+---
 
-### 1. Skeleton [REC]
-- [ ] T-1.1 Go module, `cmd/nexus`, config loader (`config.yaml` plus separate secrets), `slog`
-- [ ] T-1.2 SvelteKit app with `adapter-static`, embedded in the Go binary
-- [ ] T-1.3 SQLite store and migrations (sessions, user_prefs, household, audit)
-- [ ] T-1.4 HTTP server: security headers, request id, recover, default-deny authz table plus a startup check
-- [ ] T-1.5 GitHub Actions: lint, test, `govulncheck`, `npm audit`, build a multi-arch image and push it to GHCR on tag
+## Phase 1 — revised implementation plan
+
+Phase 1 delivers: Jellyfin sign-in with 7-day revocable sessions; a Home screen with a launcher from the server catalog; system, storage and service health for everyone, with detail for admins; a household theme; an audit log; and graceful degradation. Docker and the host are read-only.
+
+### M1 — Skeleton and CI [REC]
+- [ ] T-1.1 Go module, `cmd/nexus`, config loading (`config.yaml`, secrets, `catalog.yaml`, route registry), redacting secret type
+- [ ] T-1.2 SQLite and migrations: session_families, access_tokens, refresh_tokens, user_prefs, household, audit
+- [ ] T-1.3 HTTP server, middleware chain (ARCHITECTURE §4.2), default-deny authz table plus a startup check
+- [ ] T-1.4 SvelteKit `adapter-static` app embedded in the binary
+- [ ] T-1.5 GitHub Actions: lint, tests, `govulncheck`, `npm audit`, image build; GHCR push on tag
 - [ ] T-1.6 Dockerfile: distroless, non-root, read-only root filesystem
 
-### 2. Authentication (F-01 to F-03)
-- [ ] T-2.1 Jellyfin client: AuthenticateByName, Users/Me, Quick Connect — *blocked by D-13 for the token model*
-- [ ] T-2.2 Sessions: create, hash, cookie, expiry, revoke — *blocked by D-07*
-- [ ] T-2.3 Role mapping and periodic re-check (P-06)
-- [ ] T-2.4 Login rate limiting and identical failure responses
-- [ ] T-2.5 CSRF middleware (Origin plus header)
-- [ ] T-2.6 Login and Quick Connect pages
+### M2 — Auth, sessions, revocation, audit [OWNER A-10, A-14, A-15, A-16]
+- [ ] T-2.1 Jellyfin user-token client: AuthenticateByName, `/Users/Me`, Quick Connect, `/Sessions/Logout`
+- [ ] T-2.2 Session families: 15-minute access, rotating refresh with reuse detection, 7-day absolute cap
+- [ ] T-2.3 Jellyfin token encryption at rest (AES-GCM, family-bound associated data)
+- [ ] T-2.4 Role verification: every 5 minutes, before admin writes, and the 15-minute freshness rule
+- [ ] T-2.5 Revocation: own sessions, admin revoke, revoke-all with re-auth, Jellyfin logout
+- [ ] T-2.6 Audit writer: hash chain, fail-closed admin actions, list and verify endpoints
+- [ ] T-2.7 Rate limiting, CSRF (Origin plus header), trusted-proxy handling, Tailscale IP-range check, recording `Tailscale-User-Login`
+- [ ] T-2.8 Login, Quick Connect and session-management pages
 
-### 3. Widgets (F-05 to F-07, F-18)
-- [ ] T-3.1 Widget framework: pollers, cache, `stale` and `not_configured` states
-- [ ] T-3.2 System widget from read-only `/proc` and `/sys` — *blocked by C-04 for the access method*
-- [ ] T-3.3 Storage widget: configured mounts, mounted, ro/rw, free; internal-hdd exclusion. SMART shows `unknown` until C-04 is decided
-- [ ] T-3.4 Docker proxy client (read-only) and Services widget
-- [ ] T-3.5 SSE endpoint, filtered by role — *blocked by D-01*
-- [ ] T-3.6 Home page: tile grid, widget cards, phone and TV layouts, D-pad focus
+### M3 — Read-only metrics and failure isolation [OWNER A-03, A-04, A-07, A-08, A-17]
+- [ ] T-3.1 `resilience` package: timeouts, size caps, bulkheads, circuit breakers
+- [ ] T-3.2 Widget framework: pollers, cache, `ok`/`stale`/`unavailable`/`not_configured`, per-widget panic isolation
+- [ ] T-3.3 Host reader: `/host/proc` and `/host/sys` (CPU, RAM, load, temperature, uptime)
+- [ ] T-3.4 Storage: mountinfo parsing, configured mount list, internal-hdd exclusion, user summary and admin detail; free space only if B-09 allows
+- [ ] T-3.5 Docker read-only client (3 GET endpoints), inspect field allowlist, user up/down summary and admin container detail
+- [ ] T-3.6 SSE with role-based variants
+- [ ] T-3.7 Admin integration-status endpoint
+- [ ] T-3.8 Mount re-check (read-only)
 
-### 4. Theming (F-20) and launcher
-- [ ] T-4.1 Pin the Prism theme schema version — *depends on Prism publishing its schema*
-- [ ] T-4.2 Household theme GET and PUT, audited
-- [ ] T-4.3 Client theme runtime: material-color-utilities to CSS variables
-- [ ] T-4.4 `/api/v1/apps` and launcher tiles — *blocked by D-02, and by C-02 for any window behaviour*
+### M4 — Launcher and Home [OWNER A-02, A-09]
+- [ ] T-4.1 `catalog/0` schema, loader, admin reload (validated, audited)
+- [ ] T-4.2 Route registry; `href` only for authorized routes; otherwise the entry is unavailable
+- [ ] T-4.3 `/api/v1/auth/verify` forward-auth, enabled only if B-07 approves a `nexus`-mode route
+- [ ] T-4.4 Home UI: launcher grid, widget cards, phone and TV layouts, D-pad focus, home-layout preference
 
-### 5. Phase 1 release
-- [ ] T-5.1 Deployment notes and an example Compose file (as a document only)
-- [ ] T-5.2 **[INFRA]** Deploy the socket proxy and Nexus on knowhere, and add the Caddy route — **owner approval needed**
+### M5 — Household theme [SPEC F-20]
+- [ ] T-5.1 `prism/0` schema validation and built-in default
+- [ ] T-5.2 Household GET and PUT (admin!, audited), effective-theme endpoint
+- [ ] T-5.3 Theme runtime in the browser (material-color-utilities → CSS variables)
 
-## Phase 2 — Collector support
-- [ ] T-6.1 Introspection endpoint and service credential — *blocked by C-05, D-09*
-- [ ] T-6.2 Collector Compose-apply API, if C-01 picks option (a) — *blocked by C-01*
+### M6 — Hardening and release readiness
+- [ ] T-6.1 The full test plan below, all green in CI
+- [ ] T-6.2 Security review against SECURITY.md (self-review checklist plus `/security-review`)
+- [ ] T-6.3 Example `config.yaml`, `catalog.yaml` and route registry; deployment notes; example Compose file — **documents only**
+- [ ] T-6.4 **[INFRA]** Deploy on knowhere — only after Gate D, with the owner present
 
-## Phase 3 — Milano support (F-21, F-24, F-25)
-- [ ] T-7.1 Token exchange plus a sessions list and revoke UI
-- [ ] T-7.2 Per-user theme GET and PUT, and effective-theme resolution
-- [ ] T-7.3 Admin container restart, stop and start with an allowlist and audit — *blocked by C-03, D-04*
-- [ ] T-7.4 Mount guardrail on start — *blocked by D-03*
-- [ ] T-7.5 Jellyfin scheduled tasks: list and run
-- [ ] T-7.6 Now Playing widget — *blocked by D-01, D-13*
-- [ ] T-7.7 Host restart and shutdown with typed confirmation and re-auth — *blocked by C-04*; **[INFRA]** the host agent needs owner approval
-- [ ] T-7.8 Storage re-check action — *blocked by D-14*
-- [ ] T-7.9 Audit log viewer
+**Phase 1 exit check (from the Plan):** family members can sign in and see live status. Measured by: login works for an admin and a non-admin account; the user sees health only; the admin sees detail; stopping any one integration leaves everything else working.
 
-## Not phased in the plan (schedule to be decided)
-- [ ] T-8.1 Photos widget (Immich)
-- [ ] T-8.2 DNS widget (Pi-hole)
+---
 
-## Phase 4 — Requests and downloads (F-11, F-12, F-27)
-- [ ] T-9.1 Jellyseerr search, request and list — *blocked by D-11*
-- [ ] T-9.2 Radarr and Sonarr queue and calendar
-- [ ] T-9.3 qBittorrent widget and list
-- [ ] T-9.4 Notifications for Milano — *blocked by D-10*
+## Later phases
+### Phase 2 — Collector support
+- [ ] T-7.1 Signing keys, JWKS, rotation
+- [ ] T-7.2 Service registry, `private_key_jwt` token endpoint, scopes, `jti` replay protection, denylist, enable/disable
+- [ ] T-7.3 Delegation tokens from `/auth/verify` for `/store/`
+- [ ] T-7.4 `PUT /service/catalog` (Collector publishes; the catalog file is retired)
 
-## Phase 5 — Desktop and theme packs (F-22, F-23)
-- [ ] T-10.1 Desktop mode: windows, dock, wallpaper, per-user layout — *blocked by C-02, D-06*
-- [ ] T-10.2 Theme packs from Collector — *blocked by D-05*
-- [ ] T-10.3 Container update — *blocked by C-01, C-03, C-06*
+### Phase 3 — Milano support
+- [ ] T-8.1 Token exchange — *D-15*
+- [ ] T-8.2 Per-user themes
+- [ ] T-8.3 Admin broker and Jellyfin admin key — *D-19 [INFRA: creating a key in Jellyfin]*
+- [ ] T-8.4 Jellyfin scheduled tasks, Now Playing (admin)
 
-## Test plan (applies to every phase)
-| Area | What must be tested |
+### Phase 4 — Requests and downloads
+- [ ] T-9.1 Jellyseerr — *D-11* · T-9.2 Radarr and Sonarr · T-9.3 qBittorrent · T-9.4 Notifications — *D-10*
+
+### Phase 5 — Desktop and theme packs
+- [ ] T-10.1 Desktop mode — *D-06* · T-10.2 Theme packs — *D-05*
+
+### Separately approved work only (not scheduled)
+- Docker writes (D-18) · deployment API for Collector (D-16) · privileged host agent (D-17) · Photos and DNS widgets (not phased)
+
+---
+
+## Test plan
+| Area | What must be shown |
 |---|---|
-| Authz | A table test: every route × {anonymous, user, admin} gives the expected status; an unlisted route gives 403; startup fails if a route has no entry |
-| Auth | Login success and failure against a fake Jellyfin (`httptest`); identical failure bodies; rate limits; Quick Connect states; token exchange rejects bad or expired tokens; demotion in Jellyfin takes effect within the re-check window and immediately on admin actions |
-| Sessions | Hashing at rest; expiry; revocation; logout; cookie flags |
-| CSRF | Missing header or a foreign Origin is rejected on every unsafe method |
-| Secrets | No secret appears in any API response, log line or audit row (fuzz responses against the loaded secrets); the redaction type's `String` and `MarshalJSON` |
-| Docker | A contract test: the client can only emit allowlisted method and path pairs; non-allowlisted containers are refused; there's no create, exec, volume or image code |
-| Guardrails | `/mnt/internal-hdd` is always `excluded` and never counted; start is refused on a missing or read-only mount; format and delete-volume don't exist (route list and code search) |
-| Host | Typed confirmation mismatch; re-auth required; agent absent → 503 |
-| Widgets | A downstream timeout gives `stale` or `unavailable` without blocking; `not_configured`; size caps; role filtering over REST and SSE |
-| SSRF | No handler builds an outbound URL from client input (static analysis plus tests) |
-| Themes | Schema validation, size limits, precedence S-15 |
-| Frontend | Vitest for the theme runtime and stores; Playwright for login, Home on phone and TV viewports, D-pad focus order, admin controls hidden for users (the server is still tested separately) |
-| Supply chain | `govulncheck`, `npm audit` and image scanning in CI |
+| Authz | Every route × {anonymous, user, admin, stale admin, service}; unlisted routes denied; startup fails on a missing table entry |
+| Visibility (A-07, A-08) | User responses (REST and SSE) never contain admin fields: a schema test on the DTOs, plus a test seeded with admin-only values |
+| Login | Fake Jellyfin (`httptest`): success, failure (identical bodies), unreachable Jellyfin (502), Quick Connect states, rate limits |
+| Sessions (A-10) | 15-minute access expiry; refresh rotation; reuse revokes the family; **the 7-day absolute cap can't be exceeded by any refresh sequence** (property test with a fake clock) |
+| Revocation (A-16) | Own, admin and revoke-all (needs re-auth); immediate 401 afterwards; Jellyfin logout called; SSE `session.revoked` |
+| Role changes | Demotion in Jellyfin removes admin within 5 minutes and immediately before admin writes; admin not honoured past 15 minutes without verification while Jellyfin is down |
+| Jellyfin tokens (A-14) | Encrypted at rest; associated data stops cross-family reuse; deleted on revocation; no admin key loaded or used in Phase 1 |
+| Audit (A-15) | Every admin action and auth event writes a row; the hash chain verifies; tampering is detected; an audit write failure aborts the admin action |
+| Failure isolation (A-17) | For each integration: down, slow (timeout), oversized and erroring → `stale`/`unavailable`; other widgets and the API unaffected; breaker opens and recovers; Nexus starts with every integration down |
+| Docker (A-03) | The client can only produce the 3 GET calls; inspect output is filtered (no env, mounts or labels) |
+| Host (A-04) | Parsers tested on fixture `/proc` and `/sys` trees; no writes; internal-hdd excluded everywhere |
+| Tailscale (A-11) | Non-Tailscale client IPs rejected; `X-Forwarded-For` ignored from untrusted peers; spoofed `Tailscale-User-*` and `X-Nexus-*` headers ignored unless from the trusted proxy |
+| CSRF and web | Missing header or a foreign Origin rejected; CSP and other headers present |
+| Secrets | Fuzz all responses, logs and audit rows for the loaded secret values: none found |
+| Catalog and routes (A-02, A-09) | Invalid catalog rejected and the old one kept; entries without an authorized route have no `href`; `/auth/verify` refuses unknown routes and non-proxy callers |
+| Frontend | Vitest (theme runtime, API client refresh logic); Playwright (login, Home on phone and TV viewports, D-pad focus, admin controls hidden for users) |
+| Supply chain | `govulncheck`, `npm audit`, image scan in CI |

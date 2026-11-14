@@ -1,155 +1,185 @@
 # Nexus — Architecture
 
-Status: **draft for approval.** Nothing here is implemented.
-Tags used throughout:
-- **[SPEC]** — required by the Knowhere Platform Plan or the implementation brief.
-- **[REC]** — an engineering recommendation awaiting approval.
-- **[OPEN]** — an unresolved decision; see DECISIONS.md.
+Revision 2 (14 Nov 2026). **Not implemented.** Tags: **[OWNER]** owner-approved · **[SPEC]** Platform Plan or brief · **[REC]** recommendation pending approval · **[BLOCKER]**/**[LATER]** open. Decision ids refer to DECISIONS.md.
 
-## 1. Scope
+## 1. Role of Nexus
+Nexus is the dashboard and API at `knowhere/` **[SPEC]**, and **the central authorization and execution boundary** of the platform **[OWNER A-01]**. Concretely:
+- It is the only component that holds downstream service credentials **[SPEC S-05]**.
+- It is the only component that reaches Docker (read-only in Phase 1) and the host (read-only metrics in Phase 1) **[OWNER A-01, A-03, A-04]**.
+- Clients reach services only through Nexus or an explicitly authorized reverse-proxy route **[OWNER A-02]**.
+- Collector owns the catalog and update *workflow*. Any execution it needs is requested from Nexus, which authorizes and executes it **[OWNER A-01, A-06]**. That request API isn't designed yet and is out of scope **[OWNER A-03; LATER D-16]**.
 
-Nexus is the dashboard and API at `knowhere/` **[SPEC]**. It is the one component that:
-- holds the downstream service credentials **[SPEC S-05]**;
-- reaches Docker, through a restricted socket proxy **[SPEC S-07]**;
-- answers on behalf of the services, so client devices never call them directly **[SPEC S-08]**.
+Out of scope: Collector, Milano and Prism code; Caddy, Tailscale and socket-proxy configuration (documented here as requirements, not built); any change to knowhere.
 
-Out of scope here: Collector, Milano and Prism (separate repos), the Caddy and Tailscale setup, and any change to knowhere's existing services.
-
-## 2. Requirements extracted from the plan
+## 2. Requirements
 
 ### 2.1 Functional
 | ID | Requirement | Phase | Source |
 |---|---|---|---|
-| F-01 | Sign in with a Jellyfin username and password | 1 | Plan §Identity |
-| F-02 | Sign in with Jellyfin Quick Connect | 1 | Plan §Identity |
-| F-03 | Jellyfin admin maps to Nexus admin; everyone else is a user | 1 | Plan §Identity |
-| F-04 | Home mode: an app icon grid plus live widgets; works on phones and TVs | 1 | Plan §Dashboard |
-| F-05 | System widget: CPU, RAM, load, temperature, uptime | 1 | Plan §Dashboard, §Roadmap |
-| F-06 | Storage widget, per mount: mounted or not, read-only or read-write, free space, SMART health | 1 (SMART depends on C-04) | Plan §Dashboard |
-| F-07 | Services widget: up or down, restart count and memory for each container | 1 | Plan §Dashboard |
-| F-08 | Now Playing widget: active Jellyfin streams, direct play or transcode | 1–3 (not named in the Phase 1 list) | Plan §Dashboard |
-| F-09 | Photos widget: Immich upload count and library size | not phased | Plan §Dashboard |
-| F-10 | DNS widget: Pi-hole queries and percent blocked | not phased | Plan §Dashboard |
-| F-11 | Downloads widget: qBittorrent queue and speeds, once it exists | 4 | Plan §Dashboard, §Roadmap |
-| F-12 | Upcoming widget: Radarr and Sonarr calendar, once they exist | 4 | Plan §Dashboard, §Roadmap |
-| F-13 | Admin: restart, stop or update a container | 3 for Milano; not phased for Nexus | Plan §Dashboard, §Milano |
-| F-14 | Admin: run a Jellyfin scheduled task | not phased | Plan §Dashboard |
-| F-15 | Admin: re-check mounts | not phased | Plan §Dashboard |
-| F-16 | Admin: restart or shut down knowhere, with typed confirmation | 3 (Milano server control) | Plan §Dashboard, §Milano |
-| F-17 | Guardrail: refuse to start a write-heavy app while its mount is missing or read-only | with F-13 | Plan §Dashboard |
-| F-18 | Guardrail: never show `/mnt/internal-hdd` as usable | 1 | Plan §Dashboard |
-| F-19 | Guardrail: no format or delete-volume action exists | always | Plan §Dashboard |
-| F-20 | Household default theme, set by an admin | 1 | Plan §Theming, §Roadmap |
-| F-21 | Per-user theme stored against the Jellyfin user id and synced to devices at login | 3 | Plan §Theming, §Roadmap |
-| F-22 | Theme packs installed through Collector become selectable | 5 | Plan §Theming, §Roadmap |
-| F-23 | Desktop mode: wallpaper, dock, draggable and resizable windows, layout saved per user; the store is a window | 5 | Plan §Dashboard, §Roadmap |
-| F-24 | Milano gets server control and \*arr features through Nexus (health, mounts, containers, restart a service, power) | 3–4 | Plan §Milano |
-| F-25 | Milano exchanges its Jellyfin token for a Nexus token | 3 | Plan §Identity |
-| F-26 | Collector trusts Nexus sessions | 2 | Plan §Identity |
-| F-27 | Requests (Jellyseerr) for everyone; Radarr, Sonarr and qBittorrent queues for admins, through Nexus | 4 | Plan §Milano |
+| F-01 | Sign in with a Jellyfin password | 1 | SPEC |
+| F-02 | Sign in with Jellyfin Quick Connect | 1 | SPEC |
+| F-03 | Jellyfin admin → Nexus admin | 1 | SPEC |
+| F-04 | Home mode: launcher grid plus widgets; works on phones and TVs | 1 | SPEC |
+| F-05 | System health widget (CPU, RAM, load, temperature, uptime), visible to all users | 1 | SPEC, OWNER A-07 |
+| F-06 | Storage widget: summary for all users, detail for admins. SMART deferred. | 1 | SPEC, OWNER A-04/A-07/A-08 |
+| F-07 | Services widget: up/down for all users; container detail for admins | 1 | SPEC, OWNER A-07/A-08 |
+| F-08 | Now Playing, admin-only | 3 | SPEC, OWNER A-08 |
+| F-09 | Photos widget (Immich) | not phased | SPEC |
+| F-10 | DNS widget (Pi-hole) | not phased | SPEC |
+| F-11 | Downloads widget (qBittorrent) | 4 | SPEC |
+| F-12 | Upcoming widget (Radarr, Sonarr) | 4 | SPEC |
+| F-13 | Container restart, stop and update | **Out of scope until separately approved** | SPEC, then OWNER A-03 |
+| F-14 | Run a Jellyfin scheduled task (admin credential) | 3 | SPEC, OWNER A-14 |
+| F-15 | Re-check mounts, as a read-only refresh | 1 | SPEC, OWNER A-04 |
+| F-16 | Host restart and shutdown | **Out of scope until the agent is approved** | SPEC, then OWNER A-04 |
+| F-17 | Write-heavy mount guardrail on start | When start is approved | SPEC |
+| F-18 | `/mnt/internal-hdd` never shown as usable | 1 | SPEC |
+| F-19 | No format or delete-volume action | always | SPEC |
+| F-20 | Household default theme | 1 | SPEC |
+| F-21 | Per-user themes | 3 | SPEC |
+| F-22 | Theme packs | 5 | SPEC |
+| F-23 | Desktop mode | 5 | SPEC |
+| F-24 | Milano server control through Nexus (read-only parts are available once the Phase 1 endpoints exist) | 3 | SPEC |
+| F-25 | Milano token exchange | 3 | SPEC |
+| F-26 | Collector authenticates with signed, short-lived Nexus service tokens | 2 | OWNER A-05 |
+| F-27 | Requests and \*arr through Nexus | 4 | SPEC |
+| F-28 | Launcher reads a server-managed catalog | 1 | OWNER A-09 |
+| F-29 | Seven-day maximum sessions with revocable refresh tokens | 1 | OWNER A-10 |
+| F-30 | Session revocation (own sessions; admins for anyone) | 1 | OWNER A-16 |
+| F-31 | Administrative audit log | 1 | OWNER A-15 |
+| F-32 | Graceful, isolated failure when downstream services are down | 1 | OWNER A-17 |
 
 ### 2.2 Non-functional
 | ID | Requirement | Source |
 |---|---|---|
-| NF-01 | Go backend, a single binary, about 30–60 MB RAM | Plan; Brief |
-| NF-02 | SvelteKit compiled to static files | Plan; Brief |
-| NF-03 | Tailscale-only access | Plan; Brief |
-| NF-04 | Docker only through a restricted docker-socket-proxy | Plan; Brief |
-| NF-05 | No API keys in apps or repos | Plan |
-| NF-06 | Built by GitHub Actions; image published to GHCR; knowhere pulls it, never builds | Plan §Build |
+| NF-01 | Go, single binary, about 30–60 MB RAM | SPEC |
+| NF-02 | SvelteKit compiled to static files | SPEC |
+| NF-03 | Tailscale membership mandatory | SPEC, OWNER A-11 |
+| NF-04 | Docker through a restricted proxy; read-only in Phase 1 | SPEC, OWNER A-03 |
+| NF-05 | No API keys in apps or repos | SPEC |
+| NF-06 | Built only in GitHub Actions; image in GHCR | SPEC |
+| NF-07 | Subdomain routing preferred; paths where appropriate | OWNER A-12 |
+| NF-08 | Code lives in `ntsrihari/knowhere-nexus` | OWNER A-13 |
 
 ## 3. System context
 
 ```
- Client devices (tailnet)                knowhere
- ┌──────────────┐        ┌───────────────────────────────────────────────────────┐
- │ Browser      │──HTTPS─▶ Tailscale Serve ─▶ Caddy ─▶ Nexus (Go)               │
- │ Milano phone │        │   [infra, not Nexus]       │  ├─▶ Jellyfin API         │
- │ Milano TV    │        │                            │  ├─▶ Immich, Pi-hole APIs  │
- └──────────────┘        │                            │  ├─▶ *arr, qBit (Phase 4) │
-                         │                            │  ├─▶ docker-socket-proxy ─▶ /var/run/docker.sock
-                         │                            │  └─▶ host metrics [OPEN C-04]
-                         │ Collector ──introspect──▶ Nexus            [OPEN C-05]
-                         └───────────────────────────────────────────────────────┘
+ Tailnet devices ─▶ [ACL: family group → knowhere:443]                     (REC R-04, INFRA)
+                     │
+                     ▼
+            Tailscale Serve / TLS ─▶ Caddy  (authorized route registry, REC R-06)
+                     │                 ├─ nexus host  /           ─▶ Nexus
+                     │                 ├─ nexus host  /store/     ─▶ forward_auth Nexus ─▶ Collector   (REC R-05)
+                     │                 └─ approved service routes ─▶ upstream (auth mode per route)   (BLOCKER B-07)
+                     ▼
+                   Nexus ──user token──▶ Jellyfin           (OWNER A-14)
+                     ├────admin broker───▶ Jellyfin admin key (Phase 3, LATER D-19)
+                     ├──▶ Immich, Pi-hole, *arr, qBittorrent (keys in secrets)
+                     ├──▶ docker-socket-proxy [read-only profile] ─▶ docker.sock   (OWNER A-03)
+                     └──▶ host /proc, /sys (read-only bind)                     (OWNER A-04, BLOCKER B-09)
+ Collector ──service token + delegation token──▶ Nexus                        (OWNER A-05, REC R-03)
 ```
 
 Trust boundaries:
-1. Tailnet to Caddy (TLS ends at Tailscale Serve or Caddy).
-2. Caddy to Nexus (private network).
-3. Nexus to the downstream services (Nexus holds the credentials).
-4. Nexus to the Docker proxy (the boundary that protects root).
-5. Nexus to the host (C-04).
+1. Tailnet to TLS front end.
+2. Caddy to Nexus.
+3. Nexus to downstream services.
+4. Nexus to the Docker proxy.
+5. Nexus to the host.
+6. Collector to Nexus.
 
-## 4. Backend design [REC unless marked]
+## 4. Backend [REC unless marked]
 
-### 4.1 Layout
+### 4.1 Packages
 ```
-cmd/nexus/                 main: load config, wire dependencies, start the server
-internal/config/           config.yaml (non-secret) + secrets loader (P-07)
-internal/httpapi/          router, middleware (auth, CSRF/Origin, rate limit, security headers), handlers
-internal/auth/             Jellyfin login, Quick Connect, token exchange, sessions, role refresh
-internal/authz/            role checks; the central permission table for every route
-internal/store/            SQLite: sessions, prefs, layouts, themes, audit (P-02)
-internal/integrations/     one client package per service, built only from config base URLs
-    jellyfin/ immich/ pihole/ qbittorrent/ radarr/ sonarr/ prowlarr/ jellyseerr/
-internal/docker/           client for the socket proxy; container allowlist; no raw passthrough
-internal/host/             metrics reader (/proc, /sys); later, the host-agent client [OPEN C-04]
-internal/storage/          mount inspection, internal-hdd exclusion, write-heavy guardrail
-internal/widgets/          builds widget DTOs, caches them, publishes to SSE
-internal/events/           SSE hub
-internal/theme/            Prism theme JSON validation, precedence resolution (S-15)
-internal/audit/            append-only audit writer
-web/                       SvelteKit app (adapter-static), embedded with embed.FS
+cmd/nexus/                main, wiring
+internal/config/          config.yaml, secrets file, catalog.yaml, route registry, service registry
+internal/httpapi/         router, middleware, handlers
+internal/auth/            login, Quick Connect, sessions (access + refresh families), revocation, verify (forward-auth)
+internal/tokens/          Ed25519 signing keys, JWKS, service tokens, delegation tokens, jti denylist   (Phase 2)
+internal/authz/           default-deny route→role table; startup check
+internal/jellyfin/        user-token client; admin broker (Phase 3)
+internal/integrations/    immich, pihole, qbittorrent, radarr, sonarr, prowlarr, jellyseerr
+internal/resilience/      timeouts, size caps, bulkheads, circuit breakers               (OWNER A-17)
+internal/docker/          read-only client for the socket proxy (list, inspect, stats)  (OWNER A-03)
+internal/host/            read-only /proc and /sys readers, mountinfo parser            (OWNER A-04)
+internal/storage/         mount model, internal-hdd exclusion, summary/detail split
+internal/widgets/         pollers, cache, visibility filter (R-08), SSE publishing
+internal/catalog/         launcher catalog (file in Phase 1, Collector-published from Phase 2)
+internal/theme/           prism/0 validation, precedence
+internal/audit/           append-only hash-chained audit writer                        (OWNER A-15)
+internal/store/           SQLite and migrations
+web/                      SvelteKit (adapter-static), embedded
 ```
 
 ### 4.2 Request pipeline
-`recover → request id → security headers → Tailscale/Origin checks (P-09, D-08) → session/bearer auth → authz table → rate limit (auth and admin routes) → handler → audit (admin routes)`.
+`recover → request id → security headers → trusted-proxy and Tailscale-range check (R-04 option 2) → record Tailscale identity headers (R-04 option 3) → authenticate (access cookie or bearer) → authz table (default deny) → rate limit → fresh-admin check where required → handler → audit`
 
-The authz table is the single source of truth. A route missing from it is denied by default, and a startup check fails the build or boot when any route lacks an entry.
+### 4.3 Sessions [OWNER A-10, A-16; REC R-01, R-02]
+- A family is created at login, with an absolute expiry of login + 7 days that is never extended.
+- The access credential lives 15 minutes. The refresh credential is single-use and rotating.
+- Reuse of a refresh credential revokes the family.
+- Each family also stores the user's encrypted Jellyfin token, the last role verification time, and the Tailscale login (when present).
+- Revocation deletes the family's credentials and calls Jellyfin logout.
 
-### 4.3 Widgets
-- Each widget has a collector goroutine that polls its source on an interval, caches the last result and its timestamp, and publishes to SSE.
-- Clients get cached data. A slow or down service shows as `stale` or `unavailable`; it never blocks the request.
-- Widgets for services that aren't configured return `{"status":"not_configured"}`. This covers F-11 and F-12 ("once it exists").
-- Per-role visibility of widgets is [OPEN D-01].
+### 4.4 Jellyfin [OWNER A-14; REC R-10]
+- Phase 1 uses only the user's own token: login, `/Users/Me` role checks and logout.
+- The admin broker, holding the dedicated admin key, arrives in Phase 3, behind a fresh-admin check and audit.
 
-### 4.4 Docker
-- Nexus talks HTTP to the socket proxy, never to the socket.
-- Phase 1 uses read calls only: list containers, inspect, stats.
-- Write calls (restart, stop) are limited to an allowlist of container names in config, and are audited. See C-03.
+### 4.5 Docker [OWNER A-03]
+- The client implements only `GET /containers/json`, `GET /containers/{id}/json` and `GET /containers/{id}/stats?stream=false`.
+- There is no code path for any write.
+- The proxy runs a read-only profile (`CONTAINERS=1`, `POST=0`; everything else 0).
 
-### 4.5 Storage guardrails
-- The mount list comes from config (**the infrastructure is not assumed**).
-- Any path under `/mnt/internal-hdd` is shown as excluded (F-18). The exclusion list is in config, defaulting to that path.
-- The write-heavy start check (F-17) waits on D-03.
+### 4.6 Host [OWNER A-04; REC R-13]
+- Reads `/host/proc/{stat,meminfo,loadavg,uptime}`, `/host/proc/1/mountinfo` and `/host/sys/class/hwmon/*`.
+- Free space comes only if B-09 approves read-only data-mount binds.
+- No privileges, no host PID namespace, no `/dev`.
 
-## 5. Frontend design [REC]
-- SvelteKit with `adapter-static` and an SPA fallback. All data comes from `/api/v1`; there's no server-side rendering.
-- Routes: `/login`, `/` (Home), `/settings/theme`, `/admin/*` (only shown to admins; the server enforces this regardless), and `/desktop` from Phase 5.
-- The theme runtime reads Prism JSON, expands it with `@material/material-color-utilities` into CSS custom properties, and follows the precedence rule S-15.
-- TV and phone support: a responsive grid, focusable tiles that work with D-pad navigation, and no hover-only controls.
-- No secrets and no service URLs reach the client. Only launcher URLs (D-02) do.
+### 4.7 Failure isolation [OWNER A-17; REC R-09]
+- Every integration call goes through `resilience`.
+- Widgets read only from cache.
+- Nexus starts with every integration down.
+- Jellyfin outage: existing sessions work; admin is honoured only if verified within 15 minutes.
+
+### 4.8 Catalog and launcher [OWNER A-09; REC R-07]
+- Phase 1: `catalog.yaml` (schema `catalog/0`), read-only and reloadable by an admin (audited).
+- Entry fields: `id`, `name`, `icon`, `route` (a route-registry id or null), `audience` (`all` or `admin`), `containers` (names, for the up/down summary).
+- An entry whose `route` isn't in the authorized registry is shown as unavailable **[OWNER A-02]**.
+
+### 4.9 Audit [OWNER A-15; REC R-11]
+- Append-only, hash-chained table.
+- If the audit write fails, the admin action fails.
+
+## 5. Frontend [REC]
+- SvelteKit `adapter-static` SPA. Routes: `/login`, `/` (Home), `/settings` (theme, sessions), `/admin` (audit, sessions, catalog reload, integration health), `/desktop` (Phase 5).
+- The API client handles a 401 by refreshing once, then retrying. If the refresh fails, it goes to `/login`.
+- Admin views show only when the role says admin; the server enforces it regardless.
+- Theme runtime: `prism/0` JSON to CSS variables with material-color-utilities.
+- TV and phone: responsive grid, D-pad focus order, no hover-only controls.
+- Clients never see service URLs, only route URLs from the authorized registry.
 
 ## 6. Data model [REC]
-| Table | Key fields |
+| Table | Fields |
 |---|---|
-| `sessions` | id_hash, jellyfin_user_id, username, role, kind (cookie or bearer), device_label, created_at, last_seen_at, role_checked_at, expires_at |
+| `session_families` | id, jellyfin_user_id, username, role, role_verified_at, jellyfin_token_enc, tailscale_login, device_label, kind (browser or milano), created_at, absolute_expires_at, revoked_at, revoked_by, revoke_reason |
+| `access_tokens` | hash, family_id, expires_at |
+| `refresh_tokens` | hash, family_id, expires_at, used_at |
 | `user_prefs` | jellyfin_user_id, theme_json, home_layout_json, desktop_layout_json, updated_at |
-| `household` | key (`theme`), value_json, updated_by, updated_at |
-| `audit` | id, at, actor_user_id, actor_name, action, target, params_json (secrets redacted), result, request_id |
+| `household` | key, value_json, updated_by, updated_at |
+| `audit` | seq, at, prev_hash, hash, actor_user_id, actor_name, tailscale_login, action, target, params_json, result, request_id |
+| `jti_denylist` (Phase 2) | jti, expires_at |
 
-Jellyfin access tokens obtained at sign-in are not stored after the session is created, unless D-13 picks per-user tokens. In that case they're encrypted at rest; see SECURITY.md.
-
-## 7. Dependencies on other components
-| Component | Nexus needs from it | It needs from Nexus | Status |
+## 7. Dependencies
+| Component | Nexus needs | It needs from Nexus | Status |
 |---|---|---|---|
-| **Prism** | Theme JSON schema (seed, light/dark, radius, font, density, wallpaper) and a built-in default theme | Nexus stores and serves themes | Schema not yet written; Nexus validates against a pinned version |
-| **Collector** | Theme packs (D-05); possibly launcher entries (D-02) and write-heavy metadata (D-03) | Session introspection (C-05); a window in desktop mode; possibly Compose apply (C-01) | Interfaces open |
-| **Milano** | Nothing | Token exchange, server-control endpoints, \*arr and request proxies, theme sync, possibly notifications (D-10) | API_SPEC covers the Nexus side |
-| **Infra** (Caddy, Tailscale Serve, socket proxy, host agent) | Must exist before deploy | — | Not built by Nexus. Owner approval needed for any change |
+| Prism | Theme schema | Theme storage and serving | Provisional `prism/0` (BLOCKER B-04) |
+| Collector | Catalog publishing (Phase 2); later, deployment requests | Service tokens, delegation tokens, JWKS, `/store/` forward-auth, catalog publish API | Phase 2; deployment API LATER D-16 |
+| Milano | — | Token exchange, read-only health endpoints, per-user theme | Phase 3; D-15 |
+| Infra | Routing/TLS (B-06), authorized routes (B-07), tailnet ACL (B-08), host mounts (B-09), socket proxy (B-10) | — | Owner approval for each |
 
-## 8. Deployment [REC]
-- An image `ghcr.io/ntsrihari/knowhere-nexus:<version>`, multi-stage build, distroless base, non-root UID.
-- Mounts: `config.yaml` (read-only), secrets (read-only), and a data volume for SQLite.
-- From Phase 1, read-only host `/proc` and `/sys` mounts for metrics (pending C-04).
-- The Compose file belongs in `knowhere-homelab-archive`. **Writing it there is an infrastructure change and needs owner approval.**
+## 8. Deployment [REC; INFRA approval required to apply]
+- Image `ghcr.io/ntsrihari/knowhere-nexus:<version>`: distroless, non-root, read-only root filesystem, no added capabilities.
+- Volumes: `config/` (read-only), `secrets/` (read-only, 0600), `data/` (SQLite), `/proc` and `/sys` read-only at `/host/...`.
+- Networks: `nexus-internal` (Nexus and the socket proxy only), `edge` (Caddy and Nexus), plus each integration's network as needed.
+- The Compose file goes to `knowhere-homelab-archive` only after owner approval (B-10).

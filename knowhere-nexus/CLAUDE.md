@@ -11,7 +11,7 @@ Nexus is the dashboard and API at `knowhere/`, part of the Knowhere platform. Th
 | DECISIONS.md | Specified, proposed and open decisions |
 
 ## Current state
-**Planning only. Do not implement until the owner approves** (TASKS.md, Gate 0).
+**Planning only. Do not implement until Gate 0 in TASKS.md is cleared.** Owner-approved decisions are tagged [OWNER] in DECISIONS.md; target repo is `ntsrihari/knowhere-nexus` (A-13).
 
 ## Rules for working on Nexus
 1. **Don't invent requirements.** Every feature must trace to the Platform Plan or the brief (IDs F-xx, NF-xx, S-xx). Anything else is a recommendation, marked **[REC]**, and needs approval.
