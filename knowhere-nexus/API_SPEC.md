@@ -1,24 +1,25 @@
 # Nexus — API Specification
 
-Revision 2 (14 Nov 2026), draft. Tags: **[OWNER]**, **[SPEC]**, **[REC]**, **[BLOCKER]**/**[LATER]** (see DECISIONS.md).
+Revision 3 (14 Nov 2026), draft. Revision 3: cookie names and CSRF (R-16), refresh concurrency (R-14), no Jellyfin token retention (R-10), versioned contracts (CONTRACTS.md), trusted proxy rules (R-15). Tags: **[OWNER]**, **[SPEC]**, **[REC]**, **[BLOCKER]**/**[LATER]** (see DECISIONS.md).
 **Phase** is shown per endpoint. Anything marked *Out of scope* must not be implemented.
 
 ## 0. Conventions [REC P-15 unless marked]
 - **Base and format:** base `/api/v1`; JSON; RFC 3339 UTC times; bytes as integers.
 - **Browser credentials [OWNER A-10; REC R-01]:**
-  - `nexus_access`: `HttpOnly; Secure; SameSite=Strict; Path=/`, host-only, 15 minutes.
-  - `nexus_refresh`: same flags, `Path=/api/v1/auth/refresh`.
-  - The absolute family lifetime is 7 days.
-- **Milano credentials:** `Authorization: Bearer <access>`; refresh through the body.
+  - `__Host-nexus_access`: `Secure; HttpOnly; SameSite=Strict; Path=/`, no `Domain`, `Max-Age=900` [REC R-16].
+  - `__Secure-nexus_refresh`: `Secure; HttpOnly; SameSite=Strict; Path=/api/v1/auth`, no `Domain`, `Max-Age` = time left until the absolute expiry.
+  - The absolute family lifetime is 7 days [OWNER A-10].
+- **Milano credentials:** `Authorization: Bearer <access>`; refresh through the body. When a bearer header is present, cookies are ignored.
 - **Service credentials [OWNER A-05; REC R-03]:** `Authorization: Bearer <service access JWT>`, plus `X-Nexus-Delegation: <user delegation JWT>` when acting for a user.
-- **CSRF:** cookie-authenticated unsafe methods need `X-Nexus-CSRF: 1` and an `Origin` equal to the configured origin.
+- **CSRF [REC R-16]:** every cookie-authenticated unsafe method (POST, PUT, PATCH, DELETE), **login included**, needs `X-Nexus-CSRF: 1` **and** an `Origin` exactly equal to the configured origin (or `Sec-Fetch-Site: same-origin` when there's no `Origin`). Failure → `403 forbidden`. Nexus never sends CORS headers. GET and HEAD never change state.
+- **Callers [REC R-15]:** only peers in `trustedProxies` are served (loopback is allowed for `/healthz` only). The client IP must be in a Tailscale range. Otherwise → `403 forbidden`, audited.
 - **Errors:** `{"error":{"code":"…","message":"…"}}`.
   - `unauthenticated` 401 · `forbidden` 403 · `reauth_required` 403 · `not_found` 404 · `validation_failed` 422 · `conflict` 409 · `rate_limited` 429 · `upstream_unavailable` 502 · `not_configured` 503 · `internal` 500.
 - **Roles:**
   - `public`;
   - `user`;
   - `admin` (a Jellyfin administrator);
-  - `admin!`: admin verified against Jellyfin in the last 15 minutes [REC R-09/R-10];
+  - `admin!`: admin verified against Jellyfin (at login or re-auth) within the admin window, proposed 12 hours [REC R-10, Q-02]. Past the window, the caller is treated as `user`;
   - `admin!+reauth`: `admin!` plus a password re-auth in the last 10 minutes [REC P-11];
   - `service:<scope>`.
 - **Default deny:** any route not listed here is denied.
@@ -37,7 +38,7 @@ Revision 2 (14 Nov 2026), draft. Tags: **[OWNER]**, **[SPEC]**, **[REC]**, **[BL
 
 ### `POST /api/v1/auth/login` — public, rate limited — Phase 1
 - Request: `{"username","password"}`.
-- Nexus authenticates with Jellyfin and keeps the user's Jellyfin token, encrypted [OWNER A-14].
+- Nexus authenticates with Jellyfin using the user's own credentials [OWNER A-14], reads id, name and `IsAdministrator`, then **logs the Jellyfin token out and discards it** [REC R-10]. Passwords and tokens are never stored or logged.
 - `200` sets both cookies and returns `{"user":{"id","name","role"},"absoluteExpiresAt"}`.
 - `401` for any credential failure (one message). `502` when Jellyfin can't be reached.
 
@@ -49,18 +50,19 @@ Revision 2 (14 Nov 2026), draft. Tags: **[OWNER]**, **[SPEC]**, **[REC]**, **[BL
 
 ### `POST /api/v1/auth/refresh` — refresh credential — Phase 1
 - Browser: the cookie. Milano: `{"refreshToken"}`.
-- Rotates both credentials. It never extends `absoluteExpiresAt`.
-- A reused refresh token → `401`, the family is revoked, and the event is audited [REC R-01].
+- Rotates both credentials atomically. It never extends `absoluteExpiresAt`.
+- **Concurrency [REC R-14]:** the same refresh token presented again within 20 s of its first use returns the **same** successor pair (an idempotent replay). After 20 s → `401`, the family is revoked, and the event is audited.
+- Clients must refresh one at a time (the SPA uses the Web Locks API; Milano uses a mutex).
 - `200` → `{"user","absoluteExpiresAt"}` (Milano also gets `{"accessToken","refreshToken","accessExpiresAt"}`).
 
 ### `POST /api/v1/auth/logout` — user — Phase 1
-Revokes the current family and logs out its Jellyfin token. `204`.
+Revokes the current family; the response clears both cookies (`Max-Age=0`). `204`. Revocation semantics: R-16.
 
 ### `GET /api/v1/auth/session` — user — Phase 1
 `{"user","role","roleVerifiedAt","absoluteExpiresAt","authMethod","tailscaleLogin":<string|null>}`
 
 ### `POST /api/v1/auth/reauth` — user — Phase 1
-`{"password"}`. Verified with Jellyfin; marks the family as freshly authenticated. `204`.
+`{"password"}`. Verified with Jellyfin (the token is logged out at once); sets `reauth_at`, and refreshes `role_verified_at` and the role. `204`.
 
 ### Own sessions — user — Phase 1 [OWNER A-16]
 | Method | Path | Notes |
@@ -108,14 +110,11 @@ Revokes the current family and logs out its Jellyfin token. `204`.
 |---|---|---|---|
 | GET | `/api/v1/me` | user | `{"user","role","prefs":{"theme","homeLayout"}}` |
 | PUT | `/api/v1/me/home-layout` | user | `{"tiles":[catalogId],"widgets":[name]}`; maximum 64 KB; unknown ids rejected |
-| PUT | `/api/v1/me/theme` | user | Phase 3 [SPEC F-21]; a `prism/0` theme or `null` |
+| PUT | `/api/v1/me/theme` | user | Phase 3 [SPEC F-21]; a `knowhere.theme` document or `null` |
 | PUT | `/api/v1/me/desktop-layout` | user | Phase 5 |
 
 ## 5. Themes [SPEC F-20; REC R-12]
-`prism/0`:
-```json
-{"schema":"prism/0","seed":"#RRGGBB","mode":"light|dark|system","radius":0-32,"font":"<allowlisted family>","density":"comfortable|compact","wallpaper":null,"materialYou":false}
-```
+Bodies use the `knowhere.theme` 0.1.0 contract (CONTRACTS.md §2) [OWNER A-21]. An unsupported `schemaVersion` → `422` with code `unsupported_schema_version`.
 
 | Method | Path | Role | Phase |
 |---|---|---|---|
@@ -128,7 +127,7 @@ Revokes the current family and logs out its Jellyfin token. `204`.
 | Method | Path | Role | Phase | Notes |
 |---|---|---|---|---|
 | GET | `/api/v1/apps` | user | 1 | `[{"id","name","icon","href":<route URL or null>,"available":bool}]`. Entries with `audience: admin` are filtered for users. `href` is set only for routes in the authorized registry [OWNER A-02] |
-| POST | `/api/v1/admin/catalog/reload` | admin! | 1 | Re-reads `catalog.yaml`; `422` with errors on an invalid file, keeping the old catalog. Audited |
+| POST | `/api/v1/admin/catalog/reload` | admin! | 1 | Re-reads `catalog.yaml` (`knowhere.catalog` 0.1.0, CONTRACTS.md §1); `422` on an invalid file, an unsupported version or a non-increasing `revision`, keeping the old catalog. Response `{"revision","schemaVersion","apps":int}`. Audited |
 | PUT | `/api/v1/service/catalog` | service:`catalog:publish` + delegation (admin) | 2 | Collector publishes the catalog [OWNER A-06]. Audited |
 
 ## 7. Widgets [OWNER A-07, A-08, A-17; REC R-08]

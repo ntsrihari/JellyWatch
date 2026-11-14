@@ -1,17 +1,17 @@
 # Nexus — Tasks
 
-Revision 2 (14 Nov 2026). **Planning only. Don't start implementation until Gate 0 is cleared.**
+Revision 3 (14 Nov 2026). **Planning only. No application code until the owner explicitly approves M1 (G-6).**
 Tags: **[OWNER]** owner-approved · **[SPEC]** · **[REC]** pending approval · **[INFRA]** changes knowhere or the tailnet and needs explicit owner approval each time.
 
 ## Gate 0 — before any code
 | # | Item | Status |
 |---|---|---|
-| G-1 | Architecture decisions A-01 to A-17 | ✅ Approved by the owner, 14 Nov 2026 |
-| G-2 | B-01: approve the pending recommendations (stack P-xx, design R-01 to R-13) | ⏳ Needed |
-| G-3 | B-02: create `ntsrihari/knowhere-nexus` and attach it to the build environment; move these documents there | ⏳ Needed |
-| G-4 | B-03: Phase 1 catalog source (`catalog.yaml` until Collector publishes) | ⏳ Needed |
-| G-5 | B-04: provisional `prism/0` theme schema | ⏳ Needed |
-| G-6 | B-05a–c: confirm the defaults (widget fields, session times, Photos/DNS admin-only). Code can start on the defaults | ◻ Optional before code |
+| G-1 | Architecture decisions A-01 to A-17 | ✅ Approved |
+| G-2 | Phase 1 plan, in principle (A-18) | ✅ Approved |
+| G-3 | Catalog contract (A-20) and theme contract (A-21) | ✅ Approved → CONTRACTS.md |
+| G-4 | M1 register items: P-01, P-02, P-03, P-07, P-12, P-15, R-17 (DECISIONS.md §D "For M1") | ⏳ Owner decision |
+| G-5 | `ntsrihari/knowhere-nexus` created and attached; planning docs copied; **the planning branch stays until the copy is verified** (A-19) | ⏳ Repo not yet created |
+| G-6 | **Explicit approval to start M1** | ⏳ Owner decision |
 
 ## Gate D — before Phase 1 deployment (code can proceed without these)
 | # | Item |
@@ -28,22 +28,66 @@ Tags: **[OWNER]** owner-approved · **[SPEC]** · **[REC]** pending approval · 
 
 Phase 1 delivers: Jellyfin sign-in with 7-day revocable sessions; a Home screen with a launcher from the server catalog; system, storage and service health for everyone, with detail for admins; a household theme; an audit log; and graceful degradation. Docker and the host are read-only.
 
-### M1 — Skeleton and CI [REC]
-- [ ] T-1.1 Go module, `cmd/nexus`, config loading (`config.yaml`, secrets, `catalog.yaml`, route registry), redacting secret type
-- [ ] T-1.2 SQLite and migrations: session_families, access_tokens, refresh_tokens, user_prefs, household, audit
-- [ ] T-1.3 HTTP server, middleware chain (ARCHITECTURE §4.2), default-deny authz table plus a startup check
-- [ ] T-1.4 SvelteKit `adapter-static` app embedded in the binary
-- [ ] T-1.5 GitHub Actions: lint, tests, `govulncheck`, `npm audit`, image build; GHCR push on tag
-- [ ] T-1.6 Dockerfile: distroless, non-root, read-only root filesystem
+### M1 — Skeleton, contracts and CI
+M1 builds the base every later milestone relies on. **It has no authentication, no integrations and no host or Docker access.** The only route is `/healthz`, plus the static SPA.
+
+| # | Task | Depends on |
+|---|---|---|
+| M1-01 | **Repo bootstrap.** Copy the planning docs from `JellyWatch@ccr-cf0a3197-23ukny/knowhere-nexus/` to `knowhere-nexus` (`docs/`, with `CLAUDE.md` at the root). Verify by checksum that every file matches. The source branch is left untouched (A-19). Add `.gitignore` covering `secrets*`, `*.db`, `node_modules`, `build/` | G-5 |
+| M1-02 | **Go module and layout.** `cmd/nexus`, `internal/...` as in ARCHITECTURE §4.1 (empty packages for later milestones aren't created). Version injected at build time. `nexus serve` and `nexus healthcheck` subcommands | P-01 |
+| M1-03 | **Configuration.** Strict `config.yaml` decoding (unknown keys → error). Fields for M1: `listen`, `publicOrigin`, `trustedProxies` (parsed and validated, used from M2), `dataDir`, `catalogPath`. Invalid config → exit with a non-zero code and a clear message | P-15 |
+| M1-04 | **Secrets.** A secrets-file loader that refuses permissions broader than 0600 or a different owner UID. A `Secret` type that redacts through `String`, `GoString`, `MarshalJSON`, `MarshalText` and `slog.LogValuer`. M1 holds a single placeholder secret (the R-14 encryption key), loaded but unused | P-07 |
+| M1-05 | **HTTP server.** Standard-library `ServeMux`. Timeouts: `ReadHeaderTimeout` 5 s, `ReadTimeout` 15 s, `WriteTimeout` 30 s, `IdleTimeout` 60 s. `MaxHeaderBytes` 16 KB; bodies capped at 1 MB. Graceful shutdown | P-01 |
+| M1-06 | **Middleware (M1 subset).** Panic recovery (generic 500, stack trace only in logs), request id, security headers (SECURITY.md §4.7), structured access log with redaction, JSON error envelope | P-15 |
+| M1-07 | **Default-deny authorization.** Route registration requires a role (`public`, `user`, `admin`, `admin!`, `admin!+reauth`, `service:<scope>`). Registering a route without one panics. At startup every mux route is checked against the table, and the process refuses to start on a mismatch. Only `public` is reachable in M1, since auth arrives in M2. The `/api/` catch-all returns a 404 envelope | P-15 |
+| M1-08 | **SQLite store.** `modernc.org/sqlite`, WAL, `busy_timeout`, `foreign_keys=ON`. DB file created 0600. Forward-only, versioned, idempotent migrations. **Migration 1 creates only `schema_migrations`.** Session and audit tables come with M2 | P-02 |
+| M1-09 | **Contracts.** JSON Schema files for `knowhere.catalog` 0.1.0 and `knowhere.theme` 0.1.0 in `contracts/`. Go validators: version rules (R-17), size caps, a YAML decoder that rejects anchors, aliases and duplicate keys, regex checks, and the catalog `revision` rule. Valid and invalid fixtures. Example `catalog.yaml` and default theme | R-17, A-20, A-21 |
+| M1-10 | **Catalog loader at startup.** Load and validate the catalog file. If it's missing or invalid, start with an empty catalog and log the reason (never crash, per A-17). The `/api/v1/apps` endpoint comes in M4 | M1-09 |
+| M1-11 | **Frontend scaffold.** SvelteKit with `adapter-static` and an SPA fallback. `kit.csp` in hash mode, so there's no `'unsafe-inline'`. TypeScript strict, `svelte-check`, Vitest. A placeholder page only. Fonts self-hosted, no CDN | P-03 |
+| M1-12 | **Static serving.** Embedded `embed.FS`. SPA fallback to `index.html` for non-`/api` GET requests. Long-lived immutable caching for hashed assets, `no-cache` for `index.html`. No directory listings. Path cleaning | P-03 |
+| M1-13 | **Container image.** Multi-stage build to `gcr.io/distroless/static:nonroot`, `CGO_ENABLED=0`, pinned by digest. Runs with a read-only root filesystem and `/data` as the only writable volume. `HEALTHCHECK` uses `nexus healthcheck` | — |
+| M1-14 | **CI (GitHub Actions).** `go vet`, `staticcheck`, `go test -race`, `govulncheck`, `npm ci`, `svelte-check`, Vitest, `npm audit --audit-level=high`, gitleaks, image build. Push to GHCR **only on tags**. Actions pinned by commit SHA. Dependabot for Go, npm and Actions | — |
+| M1-15 | **Developer docs.** Fill in the `CLAUDE.md` commands section; a README with the local run steps (fake config, no real services) | — |
+
+#### M1 acceptance criteria
+1. `nexus serve` with a valid config: `GET /healthz` → `200 {"status":"ok"}`; `GET /` → the SPA; `GET /api/anything` → a `404` JSON envelope.
+2. A route registered without an authz entry → the process refuses to start (covered by a test).
+3. Unknown config key, invalid `trustedProxies` entry or bad `publicOrigin` → non-zero exit and a readable error. No secret values in the output.
+4. A secrets file that is group- or world-readable, or owned by another UID → refused at startup.
+5. Every response (200, 404, 500, static asset) carries the headers in SECURITY.md §4.7. The CSP has no `'unsafe-inline'`.
+6. The SPA loads in Playwright with **zero CSP violations** in the console.
+7. Catalog and theme validators accept every valid fixture and reject every invalid one, including: missing or unsupported `schemaVersion`, unknown field at a known version, oversized document, YAML alias or anchor, duplicate key, bad id or colour. An invalid catalog at startup → an empty catalog, not a crash.
+8. The DB file and data directory are created with modes 0600 and 0700. Migrations are idempotent; running twice is a no-op.
+9. The container runs as non-root with `--read-only` and `--cap-drop=ALL`; the healthcheck passes; the image has no shell.
+10. Idle RSS under 60 MB (spec NF-01) and a static binary.
+11. CI is green: lint, race tests, `govulncheck` (no reachable vulnerabilities), `npm audit` (no high or critical), gitleaks clean.
+12. No outbound network connection is made by Nexus during the test suite (asserted by a test transport that fails any dial).
+
+#### Security tests required before M2 starts
+| # | Test |
+|---|---|
+| ST-1 | **Default deny:** a table test of every registered route against the authz table; a startup failure test for a missing entry |
+| ST-2 | **Headers:** security headers present on every status code and route type; a CSP snapshot test |
+| ST-3 | **Secret redaction:** `Secret` through `fmt` (`%v`, `%+v`, `%#v`), `json`, `slog` (text and JSON) and error wrapping → always `[redacted]`. Startup and request logs captured with real secret values loaded, and scanned for them |
+| ST-4 | **Secrets file permissions:** 0600 accepted; 0640, 0644 and wrong owner rejected |
+| ST-5 | **Panic handling:** a handler panic → generic 500 envelope, no stack trace or internals in the body |
+| ST-6 | **Resource limits:** a body over 1 MB → 413; headers over 16 KB rejected; slow-header client cut off at `ReadHeaderTimeout` |
+| ST-7 | **Static traversal:** `../`, `%2e%2e/`, double-encoded, backslash and absolute-path requests never escape `embed.FS`; no directory listings; correct `Content-Type` with `nosniff` |
+| ST-8 | **Contract fuzzing:** `go test -fuzz` on the catalog and theme parsers (no panics; caps respected); a billion-laughs YAML fixture rejected |
+| ST-9 | **Strict config:** unknown keys and type mismatches fail; `trustedProxies` accepts only single-host CIDRs |
+| ST-10 | **File modes:** DB file 0600, data directory 0700 |
+| ST-11 | **No outbound network:** a dial-failing transport across the whole test suite |
+| ST-12 | **Container:** CI runs the image with `--read-only --cap-drop=ALL --user 65532` and checks that `healthz` succeeds and the process UID is not 0 |
+| ST-13 | **Supply chain:** `govulncheck`, `npm audit`, gitleaks and Actions pinned by SHA, enforced as required checks |
 
 ### M2 — Auth, sessions, revocation, audit [OWNER A-10, A-14, A-15, A-16]
-- [ ] T-2.1 Jellyfin user-token client: AuthenticateByName, `/Users/Me`, Quick Connect, `/Sessions/Logout`
-- [ ] T-2.2 Session families: 15-minute access, rotating refresh with reuse detection, 7-day absolute cap
-- [ ] T-2.3 Jellyfin token encryption at rest (AES-GCM, family-bound associated data)
-- [ ] T-2.4 Role verification: every 5 minutes, before admin writes, and the 15-minute freshness rule
-- [ ] T-2.5 Revocation: own sessions, admin revoke, revoke-all with re-auth, Jellyfin logout
+- [ ] T-2.1 Jellyfin login client: AuthenticateByName and Quick Connect with a per-login device id; read role; **immediately** `/Sessions/Logout` (R-10, *Q-01*)
+- [ ] T-2.2 Session families: 15-minute access, rotating refresh with reuse detection, 7-day absolute cap; atomic rotation, 20 s grace, Web Locks single-flight (R-14, *Q-04*)
+- [ ] T-2.3 Cookies (`__Host-`/`__Secure-`), CSRF (Origin plus header, login included), bearer-overrides-cookie rule (R-16)
+- [ ] T-2.4 Admin window: role from login or re-auth, honoured for 12 h (*Q-02*); re-auth endpoint
+- [ ] T-2.5 Revocation: own sessions, admin revoke, revoke-all with re-auth; synchronous cache eviction; SSE close (R-16)
 - [ ] T-2.6 Audit writer: hash chain, fail-closed admin actions, list and verify endpoints
-- [ ] T-2.7 Rate limiting, CSRF (Origin plus header), trusted-proxy handling, Tailscale IP-range check, recording `Tailscale-User-Login`
+- [ ] T-2.7 Rate limiting; trusted-peer enforcement, XFF parsing, Tailscale IP-range check, recording `Tailscale-User-Login` (R-15, *Q-07*)
 - [ ] T-2.8 Login, Quick Connect and session-management pages
 
 ### M3 — Read-only metrics and failure isolation [OWNER A-03, A-04, A-07, A-08, A-17]
@@ -107,10 +151,10 @@ Phase 1 delivers: Jellyfin sign-in with 7-day revocable sessions; a Home screen 
 | Authz | Every route × {anonymous, user, admin, stale admin, service}; unlisted routes denied; startup fails on a missing table entry |
 | Visibility (A-07, A-08) | User responses (REST and SSE) never contain admin fields: a schema test on the DTOs, plus a test seeded with admin-only values |
 | Login | Fake Jellyfin (`httptest`): success, failure (identical bodies), unreachable Jellyfin (502), Quick Connect states, rate limits |
-| Sessions (A-10) | 15-minute access expiry; refresh rotation; reuse revokes the family; **the 7-day absolute cap can't be exceeded by any refresh sequence** (property test with a fake clock) |
+| Sessions (A-10) | 15-minute access expiry; refresh rotation; reuse after the grace window revokes the family; **10 concurrent refreshes with one token all get the same successor and the family survives**; a retry after a lost response within 20 s succeeds; **the 7-day cap can't be exceeded by any refresh sequence** (property test with a fake clock) |
 | Revocation (A-16) | Own, admin and revoke-all (needs re-auth); immediate 401 afterwards; Jellyfin logout called; SSE `session.revoked` |
-| Role changes | Demotion in Jellyfin removes admin within 5 minutes and immediately before admin writes; admin not honoured past 15 minutes without verification while Jellyfin is down |
-| Jellyfin tokens (A-14) | Encrypted at rest; associated data stops cross-family reuse; deleted on revocation; no admin key loaded or used in Phase 1 |
+| Role changes | Admin is not honoured past the admin window without re-auth; re-auth by a demoted user gives the user role; admin revocation of a demoted user takes effect at once |
+| Jellyfin tokens (A-14, R-10) | Logout is called right after every login and Quick Connect; no token is persisted anywhere (DB scan); no admin key loaded in Phase 1 |
 | Audit (A-15) | Every admin action and auth event writes a row; the hash chain verifies; tampering is detected; an audit write failure aborts the admin action |
 | Failure isolation (A-17) | For each integration: down, slow (timeout), oversized and erroring → `stale`/`unavailable`; other widgets and the API unaffected; breaker opens and recovers; Nexus starts with every integration down |
 | Docker (A-03) | The client can only produce the 3 GET calls; inspect output is filtered (no env, mounts or labels) |

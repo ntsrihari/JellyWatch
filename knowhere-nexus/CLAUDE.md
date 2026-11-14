@@ -8,10 +8,11 @@ Nexus is the dashboard and API at `knowhere/`, part of the Knowhere platform. Th
 | API_SPEC.md | The `/api/v1` contract used by the web UI, Milano and Collector |
 | SECURITY.md | Threat model, sensitive operations, controls |
 | TASKS.md | Phased task list and test plan |
-| DECISIONS.md | Specified, proposed and open decisions |
+| DECISIONS.md | Owner-approved decisions, recommendation register, open questions |
+| CONTRACTS.md | Versioned catalog and theme contracts |
 
 ## Current state
-**Planning only. Do not implement until Gate 0 in TASKS.md is cleared.** Owner-approved decisions are tagged [OWNER] in DECISIONS.md; target repo is `ntsrihari/knowhere-nexus` (A-13).
+**Planning only. No application code until the owner explicitly approves M1 (TASKS.md G-6).** Owner-approved decisions are tagged [OWNER] in DECISIONS.md; target repo is `ntsrihari/knowhere-nexus` (A-13).
 
 ## Rules for working on Nexus
 1. **Don't invent requirements.** Every feature must trace to the Platform Plan or the brief (IDs F-xx, NF-xx, S-xx). Anything else is a recommendation, marked **[REC]**, and needs approval.
@@ -24,7 +25,7 @@ Nexus is the dashboard and API at `knowhere/`, part of the Knowhere platform. Th
 8. **No format, delete-volume or remove-container features, ever** (S-09).
 
 ## Stack (specified, plus the proposed libraries pending approval)
-- Go backend (single binary) — S-01. Proposed: Go 1.23+, chi, slog, modernc SQLite.
+- Go backend (single binary) — S-01. Proposed (not yet approved, see the register): Go 1.23+ standard-library net/http, slog, modernc SQLite.
 - SvelteKit, `adapter-static`, embedded in the binary — S-02 / P-03.
 - Jellyfin auth; Jellyfin admin = Nexus admin — S-03, S-04.
 

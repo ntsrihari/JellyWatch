@@ -1,265 +1,235 @@
 # Nexus — Decisions
 
-Revision 2. This revision applies the owner's decisions of 14 Nov 2026. Implementation has not started.
+Revision 3 (14 Nov 2026). **No application code exists. M1 needs explicit owner approval.**
 
-## Legend
-| Tag | Meaning | Who can change it |
-|---|---|---|
-| **[OWNER]** | Explicitly approved by the owner (Srihari) on 14 Nov 2026 | Owner only |
-| **[SPEC]** | Stated in the Knowhere Platform Plan or the original brief, and not overridden by an [OWNER] decision | Owner only |
-| **[REC]** | Engineering recommendation, **pending owner approval** | Proposed here; the owner approves |
-| **[BLOCKER]** | Unresolved; blocks the work named next to it | Owner decides |
-| **[LATER]** | Unresolved; doesn't block Phase 1 | Owner decides before that phase |
-
----
-
-## A. Owner-approved decisions [OWNER]
-
-| ID | Decision, as approved | Resolves | Engineering consequences (see the [REC] items) |
-|---|---|---|---|
-| A-01 | Nexus is the central authorization and execution boundary. Collector must request deployment operations through Nexus. | C-01 | No component but Nexus executes against Docker or the host. The deployment API is not designed yet (D-16) and stays out of scope (A-03). |
-| A-02 | No client-side direct access to backend services. All service access goes through Nexus or an explicitly authorized reverse proxy. | C-02 | A registry of authorized routes, each approved individually (R-06). No iframes of unapproved services. |
-| A-03 | Phase 1 uses read-only Docker access. Container creation, updates, deletion and other privileged operations are out of scope until separately approved. | C-03 | Restart, stop and start are also writes, so they're out of scope until approved (D-18). |
-| A-04 | Phase 1 supports read-only system metrics. Privileged host operations need a separately designed and approved agent. | C-04, D-14 | SMART health, host restart and shutdown, and remount attempts are out of Phase 1. "Re-check mounts" is a read-only refresh. Agent design: D-17. |
-| A-05 | Collector authenticates with short-lived, signed, Nexus-issued service tokens. Token audience, expiry, revocation and service identity must be defined. | C-05 | Defined in R-03. |
-| A-06 | Collector owns the catalog and update workflow. Nexus owns authorization and execution boundaries. | C-06 | Collector proposes; Nexus authorizes and executes. Conflicts with A-09 in Phase 1, before Collector exists: see B-03. |
-| A-07 | General system health widgets are visible to all users. | D-01 (part) | Field classification in R-08. |
-| A-08 | Detailed viewing activity and administrative metrics are admin-only. | D-01 (part) | Now Playing, container details, mount internals and integration health are admin-only (R-08). |
-| A-09 | The launcher reads from a server-managed application catalog. | D-02 | No client-defined launcher entries. Phase 1 source: B-03. |
-| A-10 | Sessions have a seven-day maximum lifetime, with revocable refresh tokens. | D-07 | R-01. |
-| A-11 | Tailscale network membership is mandatory. Additional identity validation is to be assessed. | D-08 (part) | Assessment and recommendation in R-04. |
-| A-12 | Prefer subdomains for service routing, with paths where appropriate. | D-09 | Tailscale HTTPS certificates limit this: see R-05 and B-06. |
-| A-13 | Target repository: `ntsrihari/knowhere-nexus`. | D-12 | The repo must be created and attached to this environment (B-02). |
-| A-14 | Normal Jellyfin operations use user-specific authentication. Privileged operations use separately protected administrative credentials. | D-13 | R-10. Phase 1 needs no Jellyfin admin credential. |
-| A-15 | Administrative audit logging is required. | P-10 | Was a recommendation; now required. Design: R-11. |
-| A-16 | Session revocation is required. | — | R-02. |
-| A-17 | Downstream services that are unavailable must fail gracefully, in isolation. | — | R-09. |
-
-## B. Specified decisions still in force [SPEC]
-
-| ID | Decision | Source | Note |
-|---|---|---|---|
-| S-01 | Go backend, single binary, about 30–60 MB RAM | Plan; Brief | |
-| S-02 | SvelteKit compiled to static files | Plan; Brief | |
-| S-03 | Jellyfin sign-in (password or Quick Connect); Nexus issues its own session | Plan; Brief | Session shape now set by A-10 |
-| S-04 | Jellyfin administrator = Nexus admin; everyone else = user | Plan; Brief | |
-| S-05 | Downstream API keys live only in Nexus's config on knowhere | Plan; Brief | |
-| S-06 | Tailscale-only access | Plan; Brief | Strengthened by A-11 |
-| S-07 | Docker through a restricted docker-socket-proxy | Plan; Brief | Read-only in Phase 1 (A-03) |
-| S-08 | Clients don't reach backend services directly | Plan; Brief | Superseded in wording by A-02 |
-| S-09 | No format or delete-volume action | Plan | |
-| S-10 | `/mnt/internal-hdd` is never shown as usable | Plan | |
-| S-11 | Refuse to start a write-heavy app while its mount is missing or read-only | Plan | Applies only once start is approved (D-18) |
-| S-12 | Host restart and shutdown need typed confirmation | Plan | Deferred by A-04 |
-| S-13 | Per-user themes are stored against the Jellyfin user id | Plan | |
-| S-14 | An admin sets the household default theme | Plan | |
-| S-15 | Theme precedence: user, then Material You (Milano), then household, then built-in | Plan | |
-| S-16 | Home mode (default) and Desktop mode | Plan | Desktop in Phase 5 |
-| S-17 | Phase 1 = sign-in, widget home, system, storage and service widgets, Prism household theme | Plan | |
-
-## C. Engineering recommendations [REC — pending approval]
-
-### Carried over from revision 1
-| ID | Recommendation | Status |
-|---|---|---|
-| P-01 | Go 1.23+, `chi` router, `net/http`, `log/slog` | Pending |
-| P-02 | SQLite via pure-Go `modernc.org/sqlite` for sessions, preferences, themes and audit | Pending |
-| P-03 | SvelteKit with `adapter-static`, embedded with `embed.FS` | Pending |
-| P-04 | Server-Sent Events for live widgets, with polling as the fallback | Pending |
-| P-05 | ~~Opaque session cookie~~ | Replaced by R-01 |
-| P-06 | Re-check the Jellyfin admin flag every 5 minutes and before admin actions | Pending; now uses the user's own token (R-10) |
-| P-07 | Secrets in a separate 0600 file or Docker secrets | Pending |
-| P-08 | No secret editing through the UI in v1 | Pending |
-| P-09 | Nexus listens only on loopback or a private network | Pending; part of R-04 |
-| P-10 | Audit log | Now required by A-15; design in R-11 |
-| P-11 | Destructive actions need a re-auth within 10 minutes | Pending; first used in Phase 1 by "revoke all sessions of a user" |
-| P-12 | No outbound URL built from client input | Pending |
-| P-13 | Milano token exchange, validated with Jellyfin `/Users/Me` | Pending (Phase 3); see D-15 |
-| P-14 | Theme expansion in the browser with material-color-utilities | Pending |
-| P-15 | `/api/v1` and a standard error envelope | Pending |
-
-### New in this revision
-
-**R-01 — Session model (implements A-10)**
-- **Access credential:**
-  - an opaque 256-bit id, stored server-side as a SHA-256 hash;
-  - lifetime 15 minutes;
-  - browser: cookie `nexus_access` (`HttpOnly; Secure; SameSite=Strict; Path=/`, host-only, no `Domain` attribute);
-  - Milano: a bearer token.
-- **Refresh credential:**
-  - an opaque 256-bit id, single-use and rotated on every refresh;
-  - browser: cookie `nexus_refresh` (`Path=/api/v1/auth/refresh`, same flags);
-  - Milano: a body field.
-- **Session family:**
-  - everything stems from one login;
-  - **absolute expiry 7 days after login, never extended**;
-  - after that, the user signs in again.
-- **Reuse detection:** presenting an already-used refresh token revokes the whole family and writes a security audit event.
-
-**R-02 — Revocation (implements A-16)**
-- Users can list and revoke their own sessions.
-- Admins can revoke any session, or every session of a user.
-- Logout revokes the current family.
-- Every revocation also calls Jellyfin `POST /Sessions/Logout` with that session's stored Jellyfin token, and then deletes the token.
-- **Effect:**
-  - In Nexus, revocation is immediate, because every request is checked server-side.
-  - Services that verify delegation tokens offline (R-03) get up to the token lifetime of staleness: at most 120 s.
-  - Anything those services ask Nexus to *execute* is re-checked against the live session (`sid`), so revocation is immediate for every privileged path.
-
-**R-03 — Service tokens (implements A-05)**
-
-| Property | Design |
+| Tag | Meaning |
 |---|---|
-| Service identity | Each service is registered in Nexus config: `id` (for example `collector`), its Ed25519 **public key**, allowed scopes and allowed audiences. The private key stays with the service. A disabled flag revokes the service instantly. |
-| Service → Nexus authentication | Client credentials with a `private_key_jwt` assertion (RFC 7523): a JWT signed by the service, `iss=sub=<service id>`, `aud=<Nexus token URL>`, `exp ≤ 60 s`, single-use `jti`. Nexus returns a **service access token**. |
-| Service access token | A JWT (EdDSA) signed by Nexus: `iss=nexus`, `aud=nexus`, `sub=svc:<id>`, `scope`, `iat`, `exp` (**5 minutes**), `jti`, `kid`. |
-| User delegation token | A JWT (EdDSA) signed by Nexus, minted when an authorized reverse proxy route calls Nexus's forward-auth check: `iss=nexus`, `aud=<service id>`, `sub=user:<jellyfin id>`, `role`, `sid` (the session family reference), `exp` (**120 seconds**), `jti`. The service verifies it offline with Nexus's JWKS. |
-| On-behalf-of calls | When Collector asks Nexus to do something for a user, it sends its service access token **and** the user's delegation token. Nexus checks the service scope, the user's role and that the `sid` session is still live. |
-| Audience | Nexus rejects any token whose `aud` isn't its own. A service must reject any token whose `aud` isn't its own id. |
-| Revocation | Short expiry; a `jti` denylist kept until expiry; disabling a service; revoking a session (through `sid`); signing-key rotation. |
-| Keys | Nexus signing keys are Ed25519, rotated every 90 days, with the old key kept in the JWKS until every token signed with it has expired. Private keys are in the secrets file. |
-| Scopes | Registered list. Proposed for Phase 2: `catalog:publish`, `themes:publish`. **Reserved and not approved:** `deploy:request` (A-03, D-16). |
-
-**R-04 — Tailscale membership and identity (assessment for A-11)**
-
-| Option | What it gives | Risks and costs | Recommendation |
-|---|---|---|---|
-| 1. Tailscale ACL/grants allowing only the family group to reach knowhere on 443 | Membership **and** per-user permission, enforced by the network | A change to the tailnet policy (infrastructure) | **Yes**, mandatory baseline |
-| 2. Nexus only accepts client IPs in Tailscale ranges (100.64.0.0/10, fd7a:115c:a1e0::/48), read from `X-Forwarded-For` set by a configured trusted proxy | Catches a misconfiguration that exposes Nexus on the LAN | Must ignore the header unless it came from the trusted proxy | **Yes**, cheap defence in depth |
-| 3. Tailscale Serve identity headers (`Tailscale-User-Login`, `Tailscale-User-Name`) | Shows who on the tailnet is calling; can bind a session to that identity, so a stolen cookie fails on another person's device | Headers are absent for tagged devices and possibly for shared-in nodes (**needs checking**); trustworthy only if every request passes through Serve | **Record in sessions and the audit log in Phase 1.** Binding sessions to it: off by default; owner to decide (B-08) |
-| 4. tailscaled LocalAPI `whois` through the mounted socket | Authoritative identity | The socket gives broad control over tailscaled | **No** |
-| 5. Embed `tsnet` in Nexus (Nexus becomes its own tailnet node) | Native, authoritative WhoIs; no Caddy needed for Nexus | Another node and auth key to manage; changes the routing design | Alternative, if the owner prefers it |
-
-**R-05 — Routing under Tailscale (implements A-12)**
-- Tailscale's HTTPS certificates cover a node's own name (`knowhere.<tailnet>.ts.net`), **not subdomains under it**. Subdomain routing therefore needs one of:
-  - (a) a domain you own, with a wildcard certificate issued through Caddy's DNS-01 challenge, and DNS (public, or Pi-hole split DNS) pointing at knowhere's Tailscale IP. A wildcard keeps service names out of Certificate Transparency logs.
-  - (b) one Tailscale node per exposed service (sidecars or tsnet), each with its own `ts.net` name.
-  - (c) paths on the single `ts.net` name.
-  - Check whether newer Tailscale features change this before deciding.
-- **Recommended:**
-  - (a) if you own a domain, otherwise (b);
-  - Nexus at the apex (or `nexus.`);
-  - **Collector's web UI at the path `/store/` on Nexus's host.** This is "paths where appropriate": it lets the host-only Nexus cookie reach the forward-auth check, without widening the cookie to a parent domain.
-- **This is infrastructure, and is blocker B-06.**
-
-**R-06 — Authorized reverse-proxy routes (implements A-02)**
-- Nexus config holds a route registry. Each entry has: route id, host or path, upstream service, auth mode, approved-by and approved-on.
-- Auth modes:
-  - `nexus` — Caddy calls `GET /api/v1/auth/verify`; Nexus injects a delegation token.
-  - `upstream` — the service's own auth, for services with native clients such as Jellyfin for Milano or the Immich app, which can't use Nexus cookies.
-- The launcher only opens entries whose route is in the registry. Other entries show as unavailable.
-- Caddy strips any client-supplied `X-Nexus-*` headers, and removes Nexus cookies before forwarding upstream. The exact directives are to be validated.
-- **Every route needs owner approval: B-07.**
-
-**R-07 — Phase 1 catalog source (reconciles A-06 with A-09)**
-- In Phase 1, Nexus serves the launcher from a **server-side `catalog.yaml`**: read-only, loaded at start, admin-maintained, schema `catalog/0`.
-- From Phase 2, Collector (which owns the catalog under A-06) publishes it to Nexus with the `catalog:publish` scope, and the file stops being used.
-- **Needs confirmation: B-03.**
-
-**R-08 — Widget visibility (implements A-07 and A-08)**
-
-| Data | All users | Admin only |
-|---|---|---|
-| System: CPU %, RAM used/total, load, temperature, uptime | ✓ | |
-| Storage summary: per mount, display label, health (ok / degraded / unavailable), used % | ✓ | |
-| Storage detail: path, ro/rw, bytes free and total, excluded flag, SMART (when approved) | | ✓ |
-| Services summary: per catalog app, display name and up/down | ✓ | |
-| Container detail: container name, image, state, restart count, memory | | ✓ |
-| Now Playing (viewing activity) | | ✓ |
-| Integration health, circuit-breaker state | | ✓ |
-| Audit log, other users' sessions | | ✓ |
-| Photos (Immich) and DNS (Pi-hole) aggregates — not phased | | ✓ proposed until confirmed |
-
-**R-09 — Failure isolation (implements A-17)**
-- Every integration client has:
-  - timeouts: connect 3 s, total 10 s;
-  - a response size cap of 2 MB;
-  - a concurrency limit of 4;
-  - a circuit breaker: opens after 5 consecutive failures, tries one request again after 30 s.
-- Widgets are always served from cache. A result is `stale` after twice its poll interval, and `unavailable` when the breaker is open and there's no cached value younger than 10 minutes.
-- Nexus starts and serves even when every integration is down. Only config and the database are needed.
-- **When Jellyfin is down:**
-  - existing sessions keep working (checked locally);
-  - new logins return `upstream_unavailable`;
-  - refresh keeps working with the last verified role, but **the admin role is honoured only if it was verified in the last 15 minutes**, otherwise requests run as a user (fail closed);
-  - revocation always works.
-- Every poller goroutine and handler recovers from panics on its own. One broken widget never affects another, or the SSE stream.
-
-**R-10 — Jellyfin credentials (implements A-14)**
-- **User credential:**
-  - the Jellyfin token from the user's own login, kept for the life of the session;
-  - encrypted at rest with AES-256-GCM, using a key from the secrets file;
-  - used for role checks and user-level Jellyfin calls;
-  - deleted, and logged out on Jellyfin, at revocation or expiry.
-- **Admin credential:**
-  - a dedicated Jellyfin API key in the secrets file;
-  - only reachable through an internal "admin broker", which requires an admin role verified in the last 15 minutes;
-  - every use is audited.
-  - **Not needed in Phase 1.**
-
-**R-11 — Audit (implements A-15)**
-- Recorded:
-  - every admin action;
-  - denied admin attempts;
-  - logins, failures and Quick Connect;
-  - refresh-token reuse;
-  - session revocations;
-  - household theme changes;
-  - catalog reloads;
-  - service token issuance and refusals.
-- Each entry: actor, Tailscale login (when present), action, target, sanitized params, result, request id and time.
-- Append-only table with a hash chain (each row includes the hash of the previous one) to make tampering evident.
-- **If the audit write fails, the admin action fails.**
-- Retention 365 days.
-
-**R-12 — Provisional theme schema**
-- Prism doesn't exist yet. Nexus ships a provisional `prism/0` schema (the fields named in the plan) and migrates to Prism's published schema later.
-- **Needs confirmation: B-04.**
-
-**R-13 — Read-only host access for Phase 1 (implements A-04)**
-- Mount host `/proc` and `/sys` read-only into the Nexus container, for CPU, RAM, load, temperature, uptime and host mount info.
-- Free space needs `statfs` on each mount point, which means read-only bind mounts of `/mnt/media` and `/mnt/immich` into Nexus. Nexus could then *read* media and photos.
-- **Alternative:** omit free space from Phase 1 and report only mounted, ro/rw and health from mountinfo.
-- **Needs approval: B-09.**
+| **[OWNER]** | Explicitly approved by the owner |
+| **[SPEC]** | From the Knowhere Platform Plan or the original brief |
+| **[REC]** | Engineering recommendation, **not approved** (§C) |
+| **Q-xx / B-xx / D-xx** | Open questions needing an owner decision (§D) |
 
 ---
 
-## D. Remaining decisions
+## A. Owner-approved decisions
 
-### Phase 1 blockers [BLOCKER]
-| ID | Decision needed | Blocks | Recommendation |
-|---|---|---|---|
-| B-01 | Approve the stack and pending recommendations P-01 to P-04, P-06 to P-09, P-11, P-12, P-14, P-15 and R-01 to R-13 (or amend them) | All code | Approve as written |
-| B-02 | Create `ntsrihari/knowhere-nexus` and attach it to this environment. I can't create repositories. | Any commit to the target repo | — |
-| B-03 | Phase 1 catalog source: a Nexus-hosted `catalog.yaml` until Collector publishes (R-07), or wait for Collector? | Launcher (T-4.x) | R-07 |
-| B-04 | Provisional `prism/0` theme schema (R-12), or wait for Prism? | Household theme (T-5.x) | R-12 |
-| B-06 | Routing and TLS: own domain with DNS-01 wildcard, a node per service, or paths only (R-05) **[INFRA]** | Phase 1 deploy, cookie scope and CSP origin | (a) if you own a domain |
-| B-07 | Which reverse-proxy routes are authorized for Phase 1, with which auth mode (R-06)? An empty list is valid: the launcher then shows entries as unavailable. **[INFRA]** | Opening launcher entries | Start with none, or Jellyfin (`upstream`) only |
-| B-08 | Tailscale identity: approve options 1 and 2, option 3 record-only, and say whether to bind sessions to the Tailscale login (R-04). Option 1 is a tailnet policy change. **[INFRA]** | Phase 1 deploy | As in R-04; binding off |
-| B-09 | Host mounts for Nexus: `/proc` and `/sys` read-only, and data mount points read-only, or no free-space figures (R-13) **[INFRA]** | Storage widget scope and deploy | `/proc` and `/sys` only; free space from read-only binds if you accept the read exposure |
-| B-10 | Approve deploying docker-socket-proxy (read-only profile) and Nexus on knowhere, plus the Caddy route, once the code is ready **[INFRA]** | Phase 1 go-live | — |
+### Architecture (approved 14 Nov 2026)
+| ID | Decision as approved |
+|---|---|
+| A-01 | Nexus is the central authorization and execution boundary. Collector requests deployment operations through Nexus. |
+| A-02 | No client-side direct access to backend services. All access goes through Nexus or an explicitly authorized reverse proxy. |
+| A-03 | Phase 1 uses read-only Docker access. Container creation, updates, deletion and other privileged operations are out of scope until separately approved. |
+| A-04 | Phase 1 supports read-only system metrics. Privileged host operations need a separately designed and approved agent. |
+| A-05 | Collector authenticates with short-lived, signed, Nexus-issued service tokens, with defined audience, expiry, revocation and service identity. |
+| A-06 | Collector owns the catalog and update workflow. Nexus owns authorization and execution boundaries. |
+| A-07 | General system health widgets are visible to all users. |
+| A-08 | Detailed viewing activity and administrative metrics are admin-only. |
+| A-09 | The launcher reads from a server-managed application catalog. |
+| A-10 | Sessions have a seven-day maximum lifetime with revocable refresh tokens. |
+| A-11 | Tailscale network membership is mandatory. Additional identity validation is to be assessed. |
+| A-12 | Prefer subdomains for service routing, with paths where appropriate. |
+| A-13 | Target repository: `ntsrihari/knowhere-nexus`. |
+| A-14 | Normal Jellyfin operations use user-specific authentication. Privileged operations use separately protected administrative credentials. |
+| A-15 | Administrative audit logging. |
+| A-16 | Session revocation. |
+| A-17 | Graceful failure isolation when downstream services are unavailable. |
 
-### Confirmations that don't block code (defaults are used until answered)
-| ID | Item | Default |
+### Phase 1 plan items (approved 14 Nov 2026)
+| ID | Decision as approved |
+|---|---|
+| A-18 | The revised Phase 1 plan is approved in principle. |
+| A-19 (B-02) | Target repository `ntsrihari/knowhere-nexus`. **Keep the current planning branch intact until the repository transfer is verified.** |
+| A-20 (B-03) | Phase 1 uses a server-side catalog file in Nexus, with a schema designed for future Collector compatibility → CONTRACTS.md §1. |
+| A-21 (B-04) | A provisional JSON theme contract (seed colour, light/dark preference, corner radius, font, density, optional wallpaper), compatible with the future Prism specification → CONTRACTS.md §2. |
+| A-22 | Requirements to address: Jellyfin credential retention; refresh rotation under concurrent requests; trusted proxy boundaries and Tailscale identity validation; minimum host access for metrics; CSRF, secure cookie attributes and session revocation; version fields on the catalog and theme contracts. Addressed in R-10, R-14, R-15, R-13, R-16 and R-17. |
+| A-23 (B-01) | R-01 to R-13 are **not** collectively approved. Each is decided on its own (§C). |
+
+### Specified, still in force
+S-01 Go · S-02 SvelteKit static · S-03 Jellyfin sign-in · S-04 admin mapping · S-05 keys only in Nexus · S-06 Tailscale only · S-07 socket proxy · S-09 no format or volume delete · S-10 internal-hdd excluded · S-11 write-heavy guardrail (when start is approved) · S-12 typed confirmation (deferred) · S-13–S-15 themes · S-16 Home and Desktop · S-17 Phase 1 scope.
+
+---
+
+## B. Status of the earlier Phase 1 blockers
+| ID | Status |
+|---|---|
+| B-01 | Replaced by the per-item register in §C (A-23) |
+| B-02 | Approved (A-19). **The repo doesn't exist yet**: checked 14 Nov 2026, only `knowhere-homelab-archive` was found |
+| B-03 | Approved (A-20) |
+| B-04 | Approved (A-21) |
+| B-05a–c | Defaults stand until changed (R-08, R-01) |
+| B-06 to B-10 | Still open; deploy-time only (§D) |
+
+---
+
+## C. Recommendation register (each needs individual approval)
+
+"Blocks M1" means M1 can't be built without a decision on it.
+
+| ID | Recommendation | Security implications | Alternatives | Blocks M1 |
+|---|---|---|---|---|
+| P-01 | Go 1.23+ with the **standard-library `net/http` ServeMux** (method patterns), `log/slog`. *Changed from chi:* the standard library now covers routing. | Fewest third-party dependencies, smallest supply-chain surface | chi; echo; gin | **Yes** |
+| P-02 | SQLite via pure-Go `modernc.org/sqlite`, WAL mode, DB file 0600 | One local file holds sessions and audit; protected by file permissions and the container user. CGO-free static binary | `mattn/go-sqlite3` (CGO); bbolt; Postgres (more RAM) | **Yes** |
+| P-03 | SvelteKit `adapter-static`, embedded with `embed.FS`, SPA fallback | Needs SvelteKit's `kit.csp` hash mode so the inline bootstrap script passes a CSP without `'unsafe-inline'` | Separate static server; SvelteKit SSR (rejected by S-02) | **Yes** |
+| P-04 | Server-Sent Events for live widgets | One-way; same auth as REST; long-lived connections need per-user caps | Websockets; polling | No (M3) |
+| P-07 | Secrets in a separate file (or Docker secrets); Nexus refuses to start if the file is broader than 0600 or owned by another UID | Keeps secrets out of committed config; a permission check stops accidental exposure | Environment variables (leak through `inspect` and `/proc`); SOPS; Vault (heavy) | **Yes** (the loader is in M1) |
+| P-08 | No secret editing in the UI in v1 | Removes a high-value attack path | UI editing behind re-auth | No |
+| P-11 | Destructive admin actions need a password re-auth within 10 minutes | Limits a stolen session's damage | Typed confirmation only | No (M2) |
+| P-12 | Outbound requests only to base URLs from config; never to client-supplied URLs | Prevents SSRF | — | **Yes** (a design rule for the HTTP client) |
+| P-13 | Milano token exchange | — | — | No (Phase 3) |
+| P-14 | Theme colour scheme computed in the browser (material-color-utilities) | No server-side parsing beyond schema validation | Compute in Go | No (M5) |
+| P-15 | `/api/v1`, JSON error envelope, default-deny route table | A consistent, testable authz surface; errors never leak internals | — | **Yes** |
+| R-01 | Sessions: 15-minute access token; single-use rotating refresh token; 7-day absolute cap | Short exposure of the access token; reuse detection catches stolen refresh tokens | Longer access tokens; signed JWT sessions (harder to revoke) | No (M2) |
+| R-02 | Revocation: own, admin, revoke-all; immediate inside Nexus | Covered in R-16 | — | No (M2) |
+| R-03 | Service tokens: `private_key_jwt`, 5-minute service tokens, 120-second delegation tokens, EdDSA | Short-lived, audience-bound, revocable; no shared secrets | mTLS; shared HMAC secret (weaker) | No (Phase 2) |
+| R-04 | Tailscale: ACL + IP-range check mandatory; identity headers recorded only | Superseded in detail by R-15 | tsnet in Nexus | No (M2 code; B-08 at deploy) |
+| R-05 | Routing: own domain with a DNS-01 wildcard certificate, otherwise a node per service; Collector at `/store/` | A wildcard certificate keeps hostnames out of CT logs; the host-only cookie avoids cross-subdomain exposure | Paths only on `ts.net` | No (deploy, B-06) |
+| R-06 | Authorized route registry, with each route approved individually | Puts A-02 into practice | — | No (M4) |
+| R-07 | Catalog file | **Approved as A-20**; contract is R-17 / CONTRACTS.md | — | (schema in M1) |
+| R-08 | Widget field visibility table | Admin data on separate endpoints and DTOs | — | No (M3) |
+| R-09 | Failure isolation: timeouts, 2 MB caps, bulkheads, circuit breakers, cache-only widgets | Stops a slow upstream from exhausting Nexus | — | No (M3) |
+| R-10 | **Revised:** don't keep Jellyfin user tokens (see below) | Removes stored long-lived Jellyfin credentials, including admins' | Keep them encrypted (rev 2) | No (M2) |
+| R-11 | Audit: append-only, hash-chained; fail-closed for admin actions; 365-day retention | Evidence of tampering; no silent admin actions | Logs only | No (M2) |
+| R-12 | Theme contract | **Approved as A-21**; versioning in R-17 | — | (schema in M1) |
+| R-13 | **Revised:** minimum host access (below) | No `/proc` bind, no devices, no capabilities | Bind `/proc`/`/sys`; host exporter | No (M3; deploy B-09) |
+| R-14 | **New:** refresh rotation under concurrency (below) | Prevents false logouts without weakening reuse detection | Plain rotation; no rotation | No (M2) |
+| R-15 | **New:** trusted proxy boundary and Tailscale identity validation (below) | Spoofing protection for client IPs and identity headers | — | No (M2) |
+| R-16 | **New:** CSRF, cookie attributes, revocation (below) | — | — | No (M2) |
+| R-17 | **New:** contract versioning (CONTRACTS.md §0) | Strict validation stops malformed or typo'd input; anchor/alias ban stops YAML bombs | Lenient parsing | **Yes** |
+
+### R-10 (revised) — Jellyfin user credentials: don't retain them
+- **Finding:**
+  - Jellyfin access tokens don't expire until logout or device removal.
+  - An **admin's token is a full Jellyfin admin credential**, so keeping it (rev 2) would store admin credentials outside the protected path A-14 requires.
+  - Nexus also has **no normal Jellyfin operation that needs a user token after sign-in**. Milano talks to Jellyfin through its own client, and Phase 1 Nexus needs only identity and role.
+- **Recommendation:**
+  - At login (password or Quick Connect), Nexus authenticates with Jellyfin using a per-login device id, reads the user id, name and `Policy.IsAdministrator`, then **immediately calls `POST /Sessions/Logout`** with that token and throws it away.
+  - Nothing Jellyfin-related is stored except user id, name and role.
+  - A-14 is still met: the user's own credentials are the only Jellyfin authentication Nexus uses.
+- **Consequences:**
+  - **Demotion latency.** Without a stored token, Nexus can't re-check the role in Phase 1.
+    - Proposal: the admin role is honoured for **12 hours** after the last verification (login or re-auth), then the session continues as a user until the person re-authenticates.
+    - An admin can revoke a demoted person's sessions at once (R-16).
+    - From Phase 3, the admin broker can re-check roles server-side.
+  - **Logout.** There's no Jellyfin token left to log out. Revoking a Nexus session affects only Nexus.
+- **To check during M2:** that `/Sessions/Logout` invalidates only that token on the deployed Jellyfin version.
+- **Alternative:** keep tokens encrypted (rev 2) for a 5-minute role re-check. Faster demotion, but stored admin-equivalent credentials.
+- **Decision needed: Q-01** (approach) and **Q-02** (the 12-hour window).
+
+### R-13 (revised) — Minimum host access for Phase 1 metrics
+| Metric | Source | Access needed |
 |---|---|---|
-| B-05a | Widget field classification (R-08) | As in the table |
-| B-05b | Session times: 15-minute access, rotating refresh, 7-day absolute | As in R-01 |
-| B-05c | Photos and DNS widgets admin-only | Admin-only |
+| CPU %, memory, load, uptime | `/proc/stat`, `/proc/meminfo`, `/proc/loadavg`, `/proc/uptime` | **None extra.** A container's own `/proc` reports these host-wide (no lxcfs on knowhere is assumed — check at deploy) |
+| Temperature | `/sys/class/hwmon/*/temp*_input`, `/sys/class/thermal/*` | **None extra.** Docker mounts the host's sysfs read-only (check at deploy; no lxcfs or sysfs masking expected) |
+| Mount present, ro/rw, free space | `/proc/self/mountinfo` + `statfs()` | **A read-only bind of each configured mount point, with `rslave` propagation** (for example `/mnt/media:/host/mnt/media:ro,rslave`), so host mount and unmount events show up inside the container |
+| `/mnt/internal-hdd` | — | **Not mounted at all.** Reported as `excluded` from config only (S-10) |
+| SMART, devices | — | **None.** Deferred (A-04, D-17) |
 
-### Later phases [LATER]
-| ID | Item | Phase |
-|---|---|---|
-| D-03 | Write-heavy apps and their required mounts (now from Collector catalog metadata, A-06) | When start is approved |
-| D-04 | Whether a start action exists | With D-18 |
-| D-05 | Theme pack handover (proposed: Collector publishes with `themes:publish`) | 5 |
-| D-06 | Wallpaper storage and limits | 5 |
-| D-10 | Notifications for Milano | 4 |
-| D-11 | Jellyseerr request identity (`X-API-User` needs checking) | 4 |
-| D-15 | Milano and the 7-day cap: may Milano silently re-exchange its stored Jellyfin token after 7 days, or must the user sign in again? | 3 |
-| D-16 | Deployment operations API from Collector to Nexus (A-01), including design, scopes and Docker permissions | Needs separate approval |
-| D-17 | Privileged host agent design (power, SMART, remount) (A-04) | Needs separate approval |
-| D-18 | Any Docker write: restart, stop, start, create, update (A-03) | Needs separate approval |
-| D-19 | Jellyfin admin API key for scheduled tasks and Now Playing (R-10); creating the key is an action in Jellyfin itself | 3 |
+- **Explicitly not granted:**
+  - a host `/proc` bind (it would expose every host process's command line, which can contain secrets);
+  - `/dev`, capabilities, privileged mode, the host PID or network namespace;
+  - the Docker socket (that's the proxy's job).
+- **Residual risk:** the read-only binds let the Nexus process *read* media and photos.
+  - Mitigations: non-root UID; Nexus code only calls `statfs` and never opens files there (enforced by test).
+  - **Alternative without data exposure:** a host-side read-only exporter (a systemd timer writing `findmnt -J` and `df` output to `/run/knowhere/storage.json`, bind-mounted read-only). That's host software, so infrastructure needing approval.
+- **Decision needed: Q-03.**
 
-### Closed items from revision 1
-C-01 → A-01 · C-02 → A-02 · C-03 → A-03 · C-04 → A-04 · C-05 → A-05, R-03 · C-06 → A-06 · D-01 → A-07, A-08, R-08 · D-02 → A-09, R-07 · D-07 → A-10, R-01 · D-08 → A-11, R-04 · D-09 → A-12, R-05 · D-12 → A-13 · D-13 → A-14, R-10 · D-14 → A-04
+### R-14 — Refresh rotation under concurrent requests
+- **Problem:** several tabs, parallel 401 retries, or a response lost after the server rotated can all present the same refresh token twice. Plain reuse detection would revoke the family and log the user out by mistake.
+- **Design:**
+  1. **Atomic rotation.** Inside a `BEGIN IMMEDIATE` transaction: `UPDATE refresh_tokens SET used_at = now, successor_id = ? WHERE hash = ? AND used_at IS NULL AND family not revoked`. Only one caller wins.
+  2. **Grace window (20 s).** A refresh token used within the last 20 s returns **the same successor pair**. To allow that, the successor's plaintext is kept encrypted (AES-GCM, key from secrets) only for the window, then wiped. No new tokens are minted for repeats.
+  3. **Reuse after the window** → the family is revoked, a security audit event is written, and the response is 401.
+  4. **Client single-flight.** The SPA uses the Web Locks API (`navigator.locks`) so only one tab refreshes at a time; the others wait and then retry with the new cookie. Milano does the same with an in-process mutex.
+  5. The successor inherits the family's absolute expiry. Old access tokens just expire (≤ 15 minutes); they aren't revoked at rotation, which would cause the same race.
+- **Security cost:** for 20 s a stolen refresh token gives the same pair as the legitimate one. It doesn't give an extra session, and use after the window is still detected.
+- **Decision needed: Q-04** (the 20 s window).
+
+### R-15 — Trusted proxy boundary and Tailscale identity validation
+**Chain** (final shape depends on B-06): `client → tailnet ACL → TLS front end (Tailscale Serve, or Caddy on the tailnet IP) → Caddy → Nexus`.
+
+| Boundary | Rule |
+|---|---|
+| Nexus listener | Binds only to its address on the private `edge` Docker network. No host-published port. |
+| Trusted peer | `trustedProxies` in config is an exact list of Caddy's address(es) (/32 or /128). Connections from any other peer are refused with 403, **except** `/healthz` from loopback (container healthcheck). |
+| Client IP | Taken from `X-Forwarded-For` **only** when the peer is trusted, using the right-most entry not in `trustedProxies`. Caddy must set or override XFF and must trust only the TLS front end's address. |
+| Tailnet membership | The client IP must be in `100.64.0.0/10` or `fd7a:115c:a1e0::/48`. Otherwise 403 and an audit entry. Together with the tailnet ACL (infrastructure, B-08), this implements A-11. |
+| `Tailscale-User-Login` / `-Name` | Read only from a trusted peer, and **only if the TLS front end is Tailscale Serve**. Phase 1 records them in the session and audit log **only**. They're never used for authorization until it's confirmed that Serve overwrites any client-supplied copies on the deployed version. Absent for tagged or shared-in devices: allowed, recorded as null. |
+| `X-Nexus-*` headers | Caddy deletes all inbound copies. Nexus ignores them unless the peer is trusted. |
+| `/api/v1/auth/verify` | Answers only trusted peers. |
+
+**Tailscale identity options (assessment for A-11):**
+- Recommended: (1) ACL, (2) IP range, (3) record headers.
+- Session binding to the Tailscale login: **off**, pending confirmation of header stripping (Q-07).
+- Alternatives:
+  - the `caddy-tailscale` plugin (Caddy does its own WhoIs);
+  - `tsnet` inside Nexus.
+- Rejected: mounting the LocalAPI socket into Nexus.
+
+### R-16 — CSRF, cookie attributes and session revocation
+
+**Cookies:**
+
+| Cookie | Attributes |
+|---|---|
+| `__Host-nexus_access` | `Secure; HttpOnly; SameSite=Strict; Path=/`; no `Domain`; `Max-Age=900` |
+| `__Secure-nexus_refresh` | `Secure; HttpOnly; SameSite=Strict; Path=/api/v1/auth`; no `Domain`; `Max-Age` = seconds left until the absolute expiry |
+
+- The `__Host-` prefix stops a sibling subdomain from setting or overwriting the access cookie (cookie tossing).
+- No cookie is readable from JavaScript.
+
+**CSRF:** all of these apply to every unsafe method (POST, PUT, PATCH, DELETE) authenticated by cookie, **including login**:
+1. `Origin` must equal the configured public origin exactly. If `Origin` is missing, `Sec-Fetch-Site: same-origin` is required; otherwise the request is rejected.
+2. A custom header `X-Nexus-CSRF: 1` is required. Cross-origin JavaScript can't send it without a CORS preflight, and **Nexus never sends CORS headers**.
+3. SameSite=Strict. Note that sibling subdomains count as *same-site*, which is why checks 1 and 2 are mandatory.
+
+Further rules:
+- GET and HEAD handlers must not change state (enforced by test).
+- When an `Authorization: Bearer` header is present, cookies are ignored.
+
+**Revocation:**
+- **Triggers:** logout; a user revoking their own session; an admin revoking a session or all of a user's sessions; refresh reuse; absolute expiry; (later) a Tailscale-binding mismatch.
+- **Effect:**
+  - In one transaction: the family is marked revoked, and its access and refresh rows are deleted.
+  - The in-memory credential cache is evicted synchronously, since Nexus is a single process.
+  - Open SSE streams for the family get `session.revoked` and are closed within 1 s.
+  - Phase 2 delegation tokens: at most 120 s of staleness; every execution path re-checks `sid`.
+- **Response:** revoked credentials get 401 `unauthenticated`. The client deletes its cookies with `Max-Age=0` on logout.
+
+---
+
+## D. Open decisions needing the owner
+
+### For M1 (approve these, or amend them, to start M1)
+| ID | Decision |
+|---|---|
+| M1-a | P-01 (standard-library HTTP), P-02 (modernc SQLite), P-03 (SvelteKit static + embed + CSP hashes), P-07 (secrets file), P-12 (no client URLs), P-15 (API conventions), R-17 (contract versioning) |
+| M1-b | Create `ntsrihari/knowhere-nexus` and attach it to this environment (A-19) |
+| M1-c | Explicit approval to start M1 |
+
+### For M2 (before authentication work)
+| ID | Decision |
+|---|---|
+| Q-01 | R-10: don't keep Jellyfin tokens (recommended), or keep them encrypted |
+| Q-02 | Admin-role window without a re-check: 12 hours? |
+| Q-04 | R-14: 20 s refresh grace window |
+| Q-07 | R-15: Tailscale-login binding off until header stripping is verified |
+| — | R-01, R-02, R-11, R-15, R-16, P-11 |
+
+### For M3 to M5
+| ID | Decision |
+|---|---|
+| Q-03 | R-13: read-only `rslave` binds of the data mounts (data readable by Nexus), or a host exporter (infrastructure) |
+| Q-05 | Theme `colorScheme`: add `system`? It wasn't in the approved field list |
+| Q-06 | Bundled font allowlist (proposal: Inter, Roboto, Roboto Flex, JetBrains Mono; self-hosted, open licences) |
+| — | R-06, R-08, R-09, P-04, P-14 |
+
+### Deploy-time (infrastructure)
+B-06 routing and TLS · B-07 authorized routes · B-08 tailnet ACL · B-09 host mounts (now Q-03) · B-10 deploy the socket proxy and Nexus.
+
+### Found during review
+| ID | Item |
+|---|---|
+| Q-08 | `ntsrihari/knowhere-homelab-archive` is **public** on GitHub (checked 14 Nov 2026), but the server notes say private. The plan commits Compose files and the catalog there. Confirm the intended visibility before any Nexus deployment files are added. |
+
+### Later (unchanged)
+D-03 write-heavy mapping · D-04 start action · D-05 theme packs · D-06 wallpaper uploads · D-10 notifications · D-11 Jellyseerr identity · D-15 Milano and the 7-day cap · D-16 deploy API · D-17 host agent · D-18 Docker writes · D-19 Jellyfin admin key · D-20 shared location for contracts.

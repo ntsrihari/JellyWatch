@@ -1,6 +1,15 @@
 # Nexus — Architecture
 
-Revision 2 (14 Nov 2026). **Not implemented.** Tags: **[OWNER]** owner-approved · **[SPEC]** Platform Plan or brief · **[REC]** recommendation pending approval · **[BLOCKER]**/**[LATER]** open. Decision ids refer to DECISIONS.md.
+Revision 3 (14 Nov 2026). **Not implemented.**
+
+> **Revision 3 changes.** These override any older text below that conflicts with them.
+> - **Jellyfin tokens are no longer kept** (R-10 revised): the token is logged out at login, and the admin role is honoured for 12 hours after verification.
+> - The `jellyfin_token_enc` column is removed.
+> - Host access is minimal: no `/proc` or `/sys` binds, only read-only `rslave` data-mount binds (R-13 revised).
+> - New designs: refresh concurrency (R-14), the trusted proxy boundary (R-15), and CSRF, cookies and revocation (R-16).
+> - Catalog and theme contracts are defined in CONTRACTS.md, both versioned (R-17).
+> - HTTP routing uses the standard library (P-01 revised).
+> - Recommendations need **individual** approval (A-23). Tags: **[OWNER]** owner-approved · **[SPEC]** Platform Plan or brief · **[REC]** recommendation pending approval · **[BLOCKER]**/**[LATER]** open. Decision ids refer to DECISIONS.md.
 
 ## 1. Role of Nexus
 Nexus is the dashboard and API at `knowhere/` **[SPEC]**, and **the central authorization and execution boundary** of the platform **[OWNER A-01]**. Concretely:
@@ -72,7 +81,7 @@ Out of scope: Collector, Milano and Prism code; Caddy, Tailscale and socket-prox
                      │                 ├─ nexus host  /store/     ─▶ forward_auth Nexus ─▶ Collector   (REC R-05)
                      │                 └─ approved service routes ─▶ upstream (auth mode per route)   (BLOCKER B-07)
                      ▼
-                   Nexus ──user token──▶ Jellyfin           (OWNER A-14)
+                   Nexus ──login only──▶ Jellyfin          (OWNER A-14, R-10)
                      ├────admin broker───▶ Jellyfin admin key (Phase 3, LATER D-19)
                      ├──▶ Immich, Pi-hole, *arr, qBittorrent (keys in secrets)
                      ├──▶ docker-socket-proxy [read-only profile] ─▶ docker.sock   (OWNER A-03)
@@ -94,19 +103,19 @@ Trust boundaries:
 ```
 cmd/nexus/                main, wiring
 internal/config/          config.yaml, secrets file, catalog.yaml, route registry, service registry
-internal/httpapi/         router, middleware, handlers
+internal/httpapi/         stdlib ServeMux, middleware, handlers (P-01)
 internal/auth/            login, Quick Connect, sessions (access + refresh families), revocation, verify (forward-auth)
 internal/tokens/          Ed25519 signing keys, JWKS, service tokens, delegation tokens, jti denylist   (Phase 2)
 internal/authz/           default-deny route→role table; startup check
-internal/jellyfin/        user-token client; admin broker (Phase 3)
+internal/jellyfin/        login-only client (authenticate, read role, logout token) (R-10); admin broker (Phase 3)
 internal/integrations/    immich, pihole, qbittorrent, radarr, sonarr, prowlarr, jellyseerr
 internal/resilience/      timeouts, size caps, bulkheads, circuit breakers               (OWNER A-17)
 internal/docker/          read-only client for the socket proxy (list, inspect, stats)  (OWNER A-03)
-internal/host/            read-only /proc and /sys readers, mountinfo parser            (OWNER A-04)
+internal/host/            container /proc and /sys readers, mountinfo + statfs only     (OWNER A-04, R-13)
 internal/storage/         mount model, internal-hdd exclusion, summary/detail split
 internal/widgets/         pollers, cache, visibility filter (R-08), SSE publishing
-internal/catalog/         launcher catalog (file in Phase 1, Collector-published from Phase 2)
-internal/theme/           prism/0 validation, precedence
+internal/catalog/         knowhere.catalog contract: file in Phase 1, Collector from Phase 2 (CONTRACTS.md)
+internal/theme/           knowhere.theme contract validation, precedence (CONTRACTS.md)
 internal/audit/           append-only hash-chained audit writer                        (OWNER A-15)
 internal/store/           SQLite and migrations
 web/                      SvelteKit (adapter-static), embedded
@@ -119,11 +128,12 @@ web/                      SvelteKit (adapter-static), embedded
 - A family is created at login, with an absolute expiry of login + 7 days that is never extended.
 - The access credential lives 15 minutes. The refresh credential is single-use and rotating.
 - Reuse of a refresh credential revokes the family.
-- Each family also stores the user's encrypted Jellyfin token, the last role verification time, and the Tailscale login (when present).
+- Each family also stores the last role verification time and the Tailscale login (when present). It stores no Jellyfin token (R-10).
+- Refresh rotation under concurrency: R-14. Cookies, CSRF and revocation: R-16.
 - Revocation deletes the family's credentials and calls Jellyfin logout.
 
 ### 4.4 Jellyfin [OWNER A-14; REC R-10]
-- Phase 1 uses only the user's own token: login, `/Users/Me` role checks and logout.
+- Phase 1: the user's own credentials are used once at login to read identity and role. The resulting token is logged out at once and never stored (R-10).
 - The admin broker, holding the dedicated admin key, arrives in Phase 3, behind a fresh-admin check and audit.
 
 ### 4.5 Docker [OWNER A-03]
@@ -132,19 +142,19 @@ web/                      SvelteKit (adapter-static), embedded
 - The proxy runs a read-only profile (`CONTAINERS=1`, `POST=0`; everything else 0).
 
 ### 4.6 Host [OWNER A-04; REC R-13]
-- Reads `/host/proc/{stat,meminfo,loadavg,uptime}`, `/host/proc/1/mountinfo` and `/host/sys/class/hwmon/*`.
-- Free space comes only if B-09 approves read-only data-mount binds.
+- Reads the container's own `/proc/{stat,meminfo,loadavg,uptime}` and `/sys/class/{hwmon,thermal}` (host-wide values; check at deploy).
+- Mount status and free space come from `/proc/self/mountinfo` and `statfs` on read-only `rslave` binds of each configured mount (R-13, Q-03).
 - No privileges, no host PID namespace, no `/dev`.
 
 ### 4.7 Failure isolation [OWNER A-17; REC R-09]
 - Every integration call goes through `resilience`.
 - Widgets read only from cache.
 - Nexus starts with every integration down.
-- Jellyfin outage: existing sessions work; admin is honoured only if verified within 15 minutes.
+- Jellyfin outage: existing sessions and refresh keep working (checked locally); new logins and re-auth fail with `upstream_unavailable`. The admin role follows the 12-hour verification window (R-10, Q-02).
 
 ### 4.8 Catalog and launcher [OWNER A-09; REC R-07]
-- Phase 1: `catalog.yaml` (schema `catalog/0`), read-only and reloadable by an admin (audited).
-- Entry fields: `id`, `name`, `icon`, `route` (a route-registry id or null), `audience` (`all` or `admin`), `containers` (names, for the up/down summary).
+- Phase 1: `catalog.yaml` in the versioned `knowhere.catalog` 0.1.0 contract (CONTRACTS.md §1), read-only and reloadable by an admin (audited).
+- Only `kind: server` entries are shown in Phase 1.
 - An entry whose `route` isn't in the authorized registry is shown as unavailable **[OWNER A-02]**.
 
 ### 4.9 Audit [OWNER A-15; REC R-11]
@@ -155,16 +165,16 @@ web/                      SvelteKit (adapter-static), embedded
 - SvelteKit `adapter-static` SPA. Routes: `/login`, `/` (Home), `/settings` (theme, sessions), `/admin` (audit, sessions, catalog reload, integration health), `/desktop` (Phase 5).
 - The API client handles a 401 by refreshing once, then retrying. If the refresh fails, it goes to `/login`.
 - Admin views show only when the role says admin; the server enforces it regardless.
-- Theme runtime: `prism/0` JSON to CSS variables with material-color-utilities.
+- Theme runtime: `knowhere.theme` JSON to CSS variables with material-color-utilities (P-14).
 - TV and phone: responsive grid, D-pad focus order, no hover-only controls.
 - Clients never see service URLs, only route URLs from the authorized registry.
 
 ## 6. Data model [REC]
 | Table | Fields |
 |---|---|
-| `session_families` | id, jellyfin_user_id, username, role, role_verified_at, jellyfin_token_enc, tailscale_login, device_label, kind (browser or milano), created_at, absolute_expires_at, revoked_at, revoked_by, revoke_reason |
+| `session_families` | id, jellyfin_user_id, username, role, role_verified_at, reauth_at, tailscale_login, device_label, kind (browser or milano), created_at, absolute_expires_at, revoked_at, revoked_by, revoke_reason |
 | `access_tokens` | hash, family_id, expires_at |
-| `refresh_tokens` | hash, family_id, expires_at, used_at |
+| `refresh_tokens` | hash, family_id, expires_at, used_at, successor_id, successor_enc (kept 20 s only, R-14) |
 | `user_prefs` | jellyfin_user_id, theme_json, home_layout_json, desktop_layout_json, updated_at |
 | `household` | key, value_json, updated_by, updated_at |
 | `audit` | seq, at, prev_hash, hash, actor_user_id, actor_name, tailscale_login, action, target, params_json, result, request_id |
@@ -173,13 +183,13 @@ web/                      SvelteKit (adapter-static), embedded
 ## 7. Dependencies
 | Component | Nexus needs | It needs from Nexus | Status |
 |---|---|---|---|
-| Prism | Theme schema | Theme storage and serving | Provisional `prism/0` (BLOCKER B-04) |
+| Prism | Theme schema | Theme storage and serving | Provisional `knowhere.theme` 0.1.0, approved (A-21) |
 | Collector | Catalog publishing (Phase 2); later, deployment requests | Service tokens, delegation tokens, JWKS, `/store/` forward-auth, catalog publish API | Phase 2; deployment API LATER D-16 |
 | Milano | — | Token exchange, read-only health endpoints, per-user theme | Phase 3; D-15 |
 | Infra | Routing/TLS (B-06), authorized routes (B-07), tailnet ACL (B-08), host mounts (B-09), socket proxy (B-10) | — | Owner approval for each |
 
 ## 8. Deployment [REC; INFRA approval required to apply]
 - Image `ghcr.io/ntsrihari/knowhere-nexus:<version>`: distroless, non-root, read-only root filesystem, no added capabilities.
-- Volumes: `config/` (read-only), `secrets/` (read-only, 0600), `data/` (SQLite), `/proc` and `/sys` read-only at `/host/...`.
+- Volumes: `config/` (read-only), `secrets/` (read-only, 0600), `data/` (SQLite), read-only `rslave` binds of configured data mounts (Q-03). No `/proc`, `/sys` or `/dev` binds.
 - Networks: `nexus-internal` (Nexus and the socket proxy only), `edge` (Caddy and Nexus), plus each integration's network as needed.
 - The Compose file goes to `knowhere-homelab-archive` only after owner approval (B-10).
